@@ -1,0 +1,18 @@
+{
+  "name": "acebott-control-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop app to connect to and control the ACEBOTT QD001 smart car over Wi-Fi/TCP.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json && tsc --project tsconfig.renderer.json",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test src/**/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "electron": "^32.2.0",
+    "typescript": "^5.7.0"
+  }
+}

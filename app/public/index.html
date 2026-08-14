@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ACEBOTT Control</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+      }
+
+      #toggle-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1.5rem;
+        cursor: pointer;
+      }
+
+      #toggle-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #status-text {
+        display: inline-block;
+        margin-left: 1rem;
+        font-weight: 600;
+      }
+
+      .status-disconnected {
+        color: #666666;
+      }
+
+      .status-connecting {
+        color: #b8860b;
+      }
+
+      .status-connected {
+        color: #1a7f37;
+      }
+
+      .status-error {
+        color: #cf222e;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ACEBOTT Control</h1>
+    <button id="toggle-button" type="button">Connect</button>
+    <span id="status-text" class="status-disconnected">Disconnected</span>
+    <script type="module" src="../dist/renderer.js"></script>
+  </body>
+</html>

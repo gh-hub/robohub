@@ -1,0 +1,7 @@
+# Node/TypeScript + Docker Rules
+
+Applies to Node/TypeScript apps (NestJS, Next.js, or plain tsc) built inside Docker in this repo.
+
+- Always exclude `**/*.tsbuildinfo` in `.dockerignore`. A host-generated incremental build cache copied into the build context makes `tsc` believe output already exists and it silently skips emitting files — the build reports success but `dist/` (or equivalent) is empty or missing.
+- For NestJS apps with a `drizzle.config.ts` (or any root-level `.ts` config file) alongside `src/`, give the project a `tsconfig.build.json` that sets `rootDir: "./src"` and excludes the config file. Without it, `tsc` infers a shared rootDir across `src/` and the loose config file, nesting compiled output under `dist/src/...` instead of `dist/...` and breaking `node dist/main.js`.
+- In a pnpm workspace Dockerfile, run `pnpm prune --prod` from `WORKDIR <package dir>`, not the workspace root. Running it at the root drops a package's own production-dependency symlinks (e.g. a runtime CLI like `drizzle-kit`) along with the real devDependencies — scoping to the package directory prunes only that package's devDependencies. `pnpm prune` also refuses to run without a TTY, so prefix just that command with `CI=true` (e.g. `RUN CI=true pnpm prune --prod`) rather than setting `ENV CI=true` for the whole Dockerfile — in a single-stage build a Dockerfile-wide `ENV` persists into the running container, changing runtime behavior unintentionally.

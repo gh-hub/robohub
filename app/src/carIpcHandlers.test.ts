@@ -1,0 +1,186 @@
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import * as net from "node:net";
+import { test } from "node:test";
+
+import { CarConnection, type ConnectionState } from "./carConnection.ts";
+import {
+  createCarIpcHandlers,
+  forwardConnectionStatus,
+  type CarConnectionLike,
+} from "./carIpcHandlers.ts";
+
+const CONNECTED_STATE: ConnectionState = {
+  status: "connected",
+  protocol: "tcp100",
+  message: "Connected to 192.168.4.1:100 (TCP)",
+};
+
+const DISCONNECTED_STATE: ConnectionState = {
+  status: "disconnected",
+  protocol: null,
+  message: null,
+};
+
+/**
+ * Minimal stand-in for `CarConnection` used to verify the handlers call the
+ * right methods and forward the right values, without any real socket I/O.
+ * Per spec.md's IPC-contract testing decision, the handlers are written
+ * against `CarConnectionLike` specifically so a fake like this is enough.
+ */
+class FakeCarConnection extends EventEmitter implements CarConnectionLike {
+  connectCallCount = 0;
+  disconnectCallCount = 0;
+
+  private state: ConnectionState;
+  private readonly connectImpl: () => Promise<void>;
+  private readonly disconnectImpl: () => Promise<void>;
+
+  constructor(options: {
+    initialState?: ConnectionState;
+    onConnect?: () => Promise<void>;
+    onDisconnect?: () => Promise<void>;
+  } = {}) {
+    super();
+    this.state = options.initialState ?? { ...DISCONNECTED_STATE };
+    this.connectImpl = options.onConnect ?? (async () => this.setState(CONNECTED_STATE));
+    this.disconnectImpl = options.onDisconnect ?? (async () => this.setState(DISCONNECTED_STATE));
+  }
+
+  getState(): ConnectionState {
+    return this.state;
+  }
+
+  async connect(): Promise<void> {
+    this.connectCallCount += 1;
+    await this.connectImpl();
+  }
+
+  async disconnect(): Promise<void> {
+    this.disconnectCallCount += 1;
+    await this.disconnectImpl();
+  }
+
+  setState(next: ConnectionState): void {
+    this.state = next;
+    this.emit("state-change", next);
+  }
+}
+
+test("handleConnect calls connection.connect() exactly once", async () => {
+  const connection = new FakeCarConnection();
+  const handlers = createCarIpcHandlers(connection);
+
+  await handlers.handleConnect();
+
+  assert.equal(connection.connectCallCount, 1);
+});
+
+test("handleConnect rejects when connection.connect() rejects", async () => {
+  const connection = new FakeCarConnection({
+    onConnect: async () => {
+      throw new Error('connect() called while status is "connecting"');
+    },
+  });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(() => handlers.handleConnect(), /connecting/);
+});
+
+test("handleDisconnect calls connection.disconnect() exactly once", async () => {
+  const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+  const handlers = createCarIpcHandlers(connection);
+
+  await handlers.handleDisconnect();
+
+  assert.equal(connection.disconnectCallCount, 1);
+});
+
+test("handleDisconnect rejects when connection.disconnect() rejects", async () => {
+  const connection = new FakeCarConnection({
+    onDisconnect: async () => {
+      throw new Error('disconnect() called while status is "disconnected"');
+    },
+  });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(() => handlers.handleDisconnect(), /disconnected/);
+});
+
+test("forwardConnectionStatus forwards every state-change event", () => {
+  const connection = new FakeCarConnection();
+  const received: ConnectionState[] = [];
+
+  forwardConnectionStatus(connection, (state) => {
+    received.push(state);
+  });
+
+  connection.setState({ status: "connecting", protocol: null, message: null });
+  connection.setState(CONNECTED_STATE);
+
+  assert.deepEqual(received, [
+    { status: "connecting", protocol: null, message: null },
+    CONNECTED_STATE,
+  ]);
+});
+
+test("forwardConnectionStatus's unsubscribe stops further forwarding", () => {
+  const connection = new FakeCarConnection();
+  const received: ConnectionState[] = [];
+
+  const unsubscribe = forwardConnectionStatus(connection, (state) => {
+    received.push(state);
+  });
+  unsubscribe();
+
+  connection.setState(CONNECTED_STATE);
+
+  assert.deepEqual(received, []);
+});
+
+test("integration: handleConnect against a real CarConnection forwards status pushes", async () => {
+  // Stands in for the "manually verified via devtools console" criterion:
+  // this drives the exact same createCarIpcHandlers/forwardConnectionStatus
+  // path a devtools-console call to window.carAPI.connect() would hit, just
+  // with a local mock TCP server in place of the physical car and a plain
+  // callback in place of webContents.send.
+  const server = net.createServer((socket) => socket.on("error", () => {}));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as net.AddressInfo;
+
+  try {
+    const connection = new CarConnection({ host: "127.0.0.1", tcpPort: port, timeoutMs: 500 });
+    const handlers = createCarIpcHandlers(connection);
+    const pushedStates: ConnectionState[] = [];
+    const unsubscribe = forwardConnectionStatus(connection, (state) => {
+      pushedStates.push(state);
+    });
+
+    await handlers.handleConnect();
+
+    assert.equal(connection.getState().status, "connected");
+    assert.equal(connection.getState().protocol, "tcp100");
+    assert.deepEqual(pushedStates, [
+      { status: "connecting", protocol: null, message: null },
+      connection.getState(),
+    ]);
+
+    const disconnectedPush = new Promise<void>((resolve) => {
+      connection.on("state-change", function onStateChange(state) {
+        if (state.status === "disconnected") {
+          connection.off("state-change", onStateChange);
+          resolve();
+        }
+      });
+    });
+    await handlers.handleDisconnect();
+    await disconnectedPush;
+
+    assert.equal(connection.getState().status, "disconnected");
+    assert.equal(pushedStates.at(-1)?.status, "disconnected");
+
+    unsubscribe();
+  } finally {
+    server.close();
+  }
+});
