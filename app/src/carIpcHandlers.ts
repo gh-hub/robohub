@@ -1,4 +1,5 @@
 import type { ConnectionState } from "./carConnection.ts";
+import { MOVEMENT_VALUES, type MovementDirection } from "./commandFrame.ts";
 
 /**
  * The subset of `CarConnection`'s public surface these handlers depend on.
@@ -10,6 +11,7 @@ export interface CarConnectionLike {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   setLedState(on: boolean): Promise<void>;
+  setMovement(direction: MovementDirection): Promise<void>;
   getState(): ConnectionState;
   on(event: "state-change", listener: (state: ConnectionState) => void): unknown;
   off(event: "state-change", listener: (state: ConnectionState) => void): unknown;
@@ -19,6 +21,7 @@ export interface CarIpcHandlers {
   handleConnect: () => Promise<void>;
   handleDisconnect: () => Promise<void>;
   handleSetLights: (on: boolean) => Promise<void>;
+  handleSetMovement: (direction: MovementDirection) => Promise<void>;
 }
 
 /**
@@ -44,13 +47,40 @@ export interface CarIpcHandlers {
  * write) when there's no active tcp100 session, and that rejection is
  * relayed here rather than swallowed, matching `handleConnect`/
  * `handleDisconnect`.
+ *
+ * `handleSetMovement` follows the identical contract via
+ * `CarConnection.setMovement()`, which shares `setLedState()`'s
+ * `sendCommandFrame()` gating/rejection shape exactly (see
+ * implement-02-movement-protocol-layer.md). It additionally validates
+ * `direction` against the `MOVEMENT_VALUES` allowlist before calling
+ * through: `direction: MovementDirection` is only a compile-time
+ * annotation, and this handler sits at the IPC trust boundary — a
+ * compromised or buggy renderer can send any string over
+ * `ipcMain.handle`, so the check has to happen at runtime here rather
+ * than being assumed from the type.
  */
 export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandlers {
   return {
     handleConnect: () => connection.connect(),
     handleDisconnect: () => connection.disconnect(),
     handleSetLights: (on: boolean) => connection.setLedState(on),
+    handleSetMovement: (direction: MovementDirection) => {
+      if (!isMovementDirection(direction)) {
+        return Promise.reject(new Error(`Invalid movement direction: ${String(direction)}`));
+      }
+      return connection.setMovement(direction);
+    },
   };
+}
+
+/**
+ * Runtime allowlist check for the `direction` value received over the
+ * `car:set-movement` IPC channel. `MovementDirection` is erased at
+ * runtime, so this is the only thing standing between an arbitrary
+ * renderer-supplied value and `MOVEMENT_VALUES[direction]`.
+ */
+function isMovementDirection(value: unknown): value is MovementDirection {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(MOVEMENT_VALUES, value);
 }
 
 /**

@@ -3,10 +3,12 @@ import * as path from "node:path";
 
 import { CarConnection } from "./carConnection.ts";
 import { createCarIpcHandlers, forwardConnectionStatus } from "./carIpcHandlers.ts";
+import type { MovementDirection } from "./commandFrame.ts";
 import {
   CAR_CONNECT_CHANNEL,
   CAR_DISCONNECT_CHANNEL,
   CAR_SET_LIGHTS_CHANNEL,
+  CAR_SET_MOVEMENT_CHANNEL,
   CAR_STATUS_CHANNEL,
 } from "./ipcChannels.ts";
 
@@ -21,6 +23,9 @@ const carIpcHandlers = createCarIpcHandlers(carConnection);
 ipcMain.handle(CAR_CONNECT_CHANNEL, () => carIpcHandlers.handleConnect());
 ipcMain.handle(CAR_DISCONNECT_CHANNEL, () => carIpcHandlers.handleDisconnect());
 ipcMain.handle(CAR_SET_LIGHTS_CHANNEL, (_event, on: boolean) => carIpcHandlers.handleSetLights(on));
+ipcMain.handle(CAR_SET_MOVEMENT_CHANNEL, (_event, direction: MovementDirection) =>
+  carIpcHandlers.handleSetMovement(direction),
+);
 
 function createWindow(): void {
   const window = new BrowserWindow({

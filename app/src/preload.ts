@@ -18,11 +18,13 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
 import type { ConnectionState } from "./carConnection.ts";
+import type { MovementDirection } from "./commandFrame.ts";
 
 const CAR_CONNECT_CHANNEL = "car:connect";
 const CAR_DISCONNECT_CHANNEL = "car:disconnect";
 const CAR_STATUS_CHANNEL = "car:status";
 const CAR_SET_LIGHTS_CHANNEL = "car:set-lights";
+const CAR_SET_MOVEMENT_CHANNEL = "car:set-movement";
 
 export interface CarApi {
   /** Initiates a connection attempt. Resolves once initiated; rejects if a
@@ -40,10 +42,18 @@ export interface CarApi {
   /** Sends the shared LED on/off command. Resolves once the frame has been
    * written to the socket; rejects (without writing) if there's no active
    * tcp100 session — see `CarConnection.setLedState()`/`sendCommandFrame()`
-   * for the exact rejection contract. Both "Left Light" and "Right Light"
-   * invoke this same call, since the wire protocol has one shared LED
-   * command (no independent left/right addressing). */
+   * for the exact rejection contract. The single Lights button invokes this
+   * call, since the wire protocol has one shared LED command (no
+   * independent left/right addressing). */
   setLights: (on: boolean) => Promise<void>;
+  /** Sends a movement command frame for the given direction. Resolves once
+   * the frame has been written to the socket; rejects (without writing) if
+   * there's no active tcp100 session — see `CarConnection.setMovement()`/
+   * `sendCommandFrame()` for the exact rejection contract. Includes
+   * `"stop"`: the renderer calls this with `"stop"` on pointerup/
+   * pointerleave/pointercancel/window-blur, not just with the six movement
+   * directions on pointerdown. */
+  setMovement: (direction: MovementDirection) => Promise<void>;
 }
 
 declare global {
@@ -56,6 +66,7 @@ const carAPI: CarApi = {
   connect: () => ipcRenderer.invoke(CAR_CONNECT_CHANNEL),
   disconnect: () => ipcRenderer.invoke(CAR_DISCONNECT_CHANNEL),
   setLights: (on) => ipcRenderer.invoke(CAR_SET_LIGHTS_CHANNEL, on),
+  setMovement: (direction) => ipcRenderer.invoke(CAR_SET_MOVEMENT_CHANNEL, direction),
   onStatus: (callback) => {
     const listener = (_event: IpcRendererEvent, state: ConnectionState): void => callback(state);
     ipcRenderer.on(CAR_STATUS_CHANNEL, listener);

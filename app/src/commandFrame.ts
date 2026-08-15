@@ -27,6 +27,33 @@ export const CMD_RUN = 0x01;
 // command actually needs them.
 export const DEVICE_LED = 0x05;
 
+// Device code for direct motor control, reverse-engineered from the
+// firmware's runModule() (see ADR-001 at
+// .gh-workflows/plans/20260815_065830-car-movement-light-controls/grill/ADR-001.md).
+export const DEVICE_MOTOR = 0x0c;
+
+// One value byte per supported movement direction, per ADR-001's device/value
+// table. The firmware also defines diagonals (0x05-0x08) — intentionally out
+// of scope for this plan, so left undeclared.
+export type MovementDirection =
+  | "stop"
+  | "forward"
+  | "backward"
+  | "left"
+  | "right"
+  | "rotate-left"
+  | "rotate-right";
+
+export const MOVEMENT_VALUES: Record<MovementDirection, number> = {
+  stop: 0x00,
+  forward: 0x01,
+  backward: 0x02,
+  left: 0x03,
+  right: 0x04,
+  "rotate-left": 0x09,
+  "rotate-right": 0x0a,
+};
+
 export interface CommandFrameFields {
   action: number;
   device: number;

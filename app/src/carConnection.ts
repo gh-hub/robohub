@@ -10,7 +10,14 @@ import {
   CAR_SSID,
   CAR_TCP_PORT,
 } from "./carConfig.ts";
-import { buildCommandFrame, CMD_RUN, DEVICE_LED } from "./commandFrame.ts";
+import {
+  buildCommandFrame,
+  CMD_RUN,
+  DEVICE_LED,
+  DEVICE_MOTOR,
+  MOVEMENT_VALUES,
+  type MovementDirection,
+} from "./commandFrame.ts";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -184,6 +191,19 @@ export class CarConnection extends EventEmitter {
   async setLedState(on: boolean): Promise<void> {
     await this.sendCommandFrame(
       buildCommandFrame({ action: CMD_RUN, device: DEVICE_LED, value: on ? 1 : 0 }),
+    );
+  }
+
+  /**
+   * Convenience wrapper over `sendCommandFrame()` for direct motor control
+   * (see ADR-001 at
+   * .gh-workflows/plans/20260815_065830-car-movement-light-controls/grill/ADR-001.md).
+   * Same gating/rejection contract as `setLedState()` — inherited from
+   * `sendCommandFrame()` rather than duplicated here.
+   */
+  async setMovement(direction: MovementDirection): Promise<void> {
+    await this.sendCommandFrame(
+      buildCommandFrame({ action: CMD_RUN, device: DEVICE_MOTOR, value: MOVEMENT_VALUES[direction] }),
     );
   }
 

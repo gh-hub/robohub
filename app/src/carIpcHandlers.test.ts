@@ -4,6 +4,7 @@ import * as net from "node:net";
 import { test } from "node:test";
 
 import { CarConnection, type ConnectionState } from "./carConnection.ts";
+import type { MovementDirection } from "./commandFrame.ts";
 import {
   createCarIpcHandlers,
   forwardConnectionStatus,
@@ -32,23 +33,27 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   connectCallCount = 0;
   disconnectCallCount = 0;
   setLedStateCalls: boolean[] = [];
+  setMovementCalls: MovementDirection[] = [];
 
   private state: ConnectionState;
   private readonly connectImpl: () => Promise<void>;
   private readonly disconnectImpl: () => Promise<void>;
   private readonly setLedStateImpl: (on: boolean) => Promise<void>;
+  private readonly setMovementImpl: (direction: MovementDirection) => Promise<void>;
 
   constructor(options: {
     initialState?: ConnectionState;
     onConnect?: () => Promise<void>;
     onDisconnect?: () => Promise<void>;
     onSetLedState?: (on: boolean) => Promise<void>;
+    onSetMovement?: (direction: MovementDirection) => Promise<void>;
   } = {}) {
     super();
     this.state = options.initialState ?? { ...DISCONNECTED_STATE };
     this.connectImpl = options.onConnect ?? (async () => this.setState(CONNECTED_STATE));
     this.disconnectImpl = options.onDisconnect ?? (async () => this.setState(DISCONNECTED_STATE));
     this.setLedStateImpl = options.onSetLedState ?? (async () => {});
+    this.setMovementImpl = options.onSetMovement ?? (async () => {});
   }
 
   getState(): ConnectionState {
@@ -68,6 +73,11 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   async setLedState(on: boolean): Promise<void> {
     this.setLedStateCalls.push(on);
     await this.setLedStateImpl(on);
+  }
+
+  async setMovement(direction: MovementDirection): Promise<void> {
+    this.setMovementCalls.push(direction);
+    await this.setMovementImpl(direction);
   }
 
   setState(next: ConnectionState): void {
@@ -143,6 +153,84 @@ test("handleSetLights rejects when connection.setLedState() rejects", async () =
   const handlers = createCarIpcHandlers(connection);
 
   await assert.rejects(() => handlers.handleSetLights(true), /sendCommandFrame/);
+});
+
+const MOVEMENT_DIRECTIONS: MovementDirection[] = [
+  "stop",
+  "forward",
+  "backward",
+  "left",
+  "right",
+  "rotate-left",
+  "rotate-right",
+];
+
+for (const direction of MOVEMENT_DIRECTIONS) {
+  test(`handleSetMovement calls connection.setMovement("${direction}")`, async () => {
+    const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+    const handlers = createCarIpcHandlers(connection);
+
+    await handlers.handleSetMovement(direction);
+
+    assert.deepEqual(connection.setMovementCalls, [direction]);
+  });
+}
+
+test("handleSetMovement rejects an invalid direction string without reaching connection.setMovement()", async () => {
+  const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(
+    () => handlers.handleSetMovement("diagonal" as MovementDirection),
+    /Invalid movement direction/,
+  );
+
+  assert.deepEqual(connection.setMovementCalls, []);
+});
+
+test("handleSetMovement rejects an empty string direction without reaching connection.setMovement()", async () => {
+  const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(() => handlers.handleSetMovement("" as MovementDirection));
+
+  assert.deepEqual(connection.setMovementCalls, []);
+});
+
+const INHERITED_OBJECT_PROTOTYPE_NAMES = [
+  "constructor",
+  "toString",
+  "hasOwnProperty",
+  "valueOf",
+  "__proto__",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "toLocaleString",
+];
+
+for (const direction of INHERITED_OBJECT_PROTOTYPE_NAMES) {
+  test(`handleSetMovement rejects inherited Object.prototype name "${direction}" without reaching connection.setMovement()`, async () => {
+    const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+    const handlers = createCarIpcHandlers(connection);
+
+    await assert.rejects(
+      () => handlers.handleSetMovement(direction as MovementDirection),
+      /Invalid movement direction/,
+    );
+
+    assert.deepEqual(connection.setMovementCalls, []);
+  });
+}
+
+test("handleSetMovement rejects when connection.setMovement() rejects", async () => {
+  const connection = new FakeCarConnection({
+    onSetMovement: async () => {
+      throw new Error('sendCommandFrame() called while status is "disconnected" and protocol is "null"');
+    },
+  });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(() => handlers.handleSetMovement("forward"), /sendCommandFrame/);
 });
 
 test("forwardConnectionStatus forwards every state-change event", () => {

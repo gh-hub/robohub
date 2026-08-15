@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ConnectionState } from "./carConnection.ts";
-import { mapConnectionStatusToUiState, mapLightControlUiState } from "./connectionUiState.ts";
+import {
+  mapConnectionStatusToUiState,
+  mapLightControlUiState,
+  mapMovementControlUiState,
+} from "./connectionUiState.ts";
 
 test("disconnected state maps to an enabled Connect button and disconnected status text", () => {
   const state: ConnectionState = { status: "disconnected", protocol: null, message: null };
@@ -108,4 +112,19 @@ test("light buttons' state label mirrors the lights-on boolean when on", () => {
 test("light buttons' state label reflects lights-on even while disabled (e.g. disconnected)", () => {
   assert.equal(mapLightControlUiState(DISCONNECTED, true).stateLabel, "On");
   assert.equal(mapLightControlUiState(DISCONNECTED, false).stateLabel, "Off");
+});
+
+for (const [name, state] of [
+  ["disconnected", DISCONNECTED],
+  ["connecting", CONNECTING],
+  ["connected over http80", CONNECTED_HTTP80],
+  ["error", ERROR],
+] as const) {
+  test(`movement buttons are disabled when connection is ${name}`, () => {
+    assert.equal(mapMovementControlUiState(state).disabled, true);
+  });
+}
+
+test("movement buttons are enabled when connected over tcp100", () => {
+  assert.equal(mapMovementControlUiState(CONNECTED_TCP100).disabled, false);
 });

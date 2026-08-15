@@ -1,0 +1,12 @@
+# 01 — [security] Fix prototype-chain bypass in movement-direction allowlist check
+
+**What to build:** In `app/src/carIpcHandlers.ts`, the `isMovementDirection()` guard currently uses `value in MOVEMENT_VALUES`, which walks the prototype chain and returns `true` for inherited `Object.prototype` property names like `"constructor"`, `"toString"`, `"hasOwnProperty"`, `"valueOf"`, `"__proto__"`, `"isPrototypeOf"`, `"propertyIsEnumerable"`, `"toLocaleString"` — none of which are valid movement directions, but all of which pass the current check. When one of these strings is passed, `MOVEMENT_VALUES[value]` returns a non-numeric value (an inherited function/object, not a byte value), which gets silently coerced to byte 0 when written into the command-frame buffer — reintroducing the exact "unvalidated string silently resolves to stop-equivalent byte 0 instead of being rejected" bug the round-1 fix was supposed to close, just with a narrower (but still real) set of trigger strings. Fix: replace `value in MOVEMENT_VALUES` with `Object.prototype.hasOwnProperty.call(MOVEMENT_VALUES, value)`, or equivalently check membership via a `Set` of the known direction strings, or `Array.isArray`/`.includes()` against an explicit allowlist array — any of these correctly excludes inherited prototype properties.
+
+**Blocked by:** None — can start immediately
+
+**Status:** ready
+
+- [x] `isMovementDirection()` (or equivalent check) uses own-property/Set/array membership, not the `in` operator, so it does not walk the prototype chain — now `Object.prototype.hasOwnProperty.call(MOVEMENT_VALUES, value)`
+- [x] Unit test added asserting `handleSetMovement` rejects direction strings that are inherited `Object.prototype` property names (e.g. `"constructor"`, `"toString"`, `"__proto__"`) without reaching `CarConnection.setMovement()` or the TCP socket — 8 new tests in `carIpcHandlers.test.ts` covering `constructor`, `toString`, `hasOwnProperty`, `valueOf`, `__proto__`, `isPrototypeOf`, `propertyIsEnumerable`, `toLocaleString`; confirmed all 8 fail against the pre-fix `in`-based check and pass after the fix
+- [x] Existing tests for valid directions and for the previously-tested invalid strings (e.g. empty string, `"diagonal"`) still pass unchanged
+- [x] Full test suite and build still pass after the change — 86/86 tests pass (78 pre-existing + 8 new), `npm run typecheck` and `npm run build` both clean

@@ -16,14 +16,24 @@
 import {
   mapConnectionStatusToUiState,
   mapLightControlUiState,
+  mapMovementControlUiState,
   type ConnectionState,
 } from "./connectionUiState.ts";
+
+// Redeclared locally rather than imported from commandFrame.ts — that file
+// is part of the CommonJS main-process build (tsconfig.build.json); pulling
+// it into this file's ES-module compilation unit (tsconfig.renderer.json)
+// would hit the same dist-clobbering problem documented above for
+// carConnection.ts's ConnectionState. Keep in sync with commandFrame.ts's
+// `MovementDirection` by hand.
+type MovementDirection = "stop" | "forward" | "backward" | "left" | "right" | "rotate-left" | "rotate-right";
 
 interface CarApi {
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   onStatus: (callback: (state: ConnectionState) => void) => () => void;
   setLights: (on: boolean) => Promise<void>;
+  setMovement: (direction: MovementDirection) => Promise<void>;
 }
 
 declare global {
@@ -37,12 +47,27 @@ declare global {
 // the safe default until the first onStatus push arrives.
 let currentState: ConnectionState = { status: "disconnected", protocol: null, message: null };
 
-// Mirrored on/off state for both light buttons — one shared boolean, not two
-// independent ones, since the wire protocol has a single LED command with
-// no independent left/right addressing (see spec.md). App-tracked/optimistic
-// only: the protocol has no state-readback channel, so this never reflects
-// a query of the hardware, only what the app last told it to do.
+// On/off state for the single Lights button. App-tracked/optimistic only:
+// the protocol has no state-readback channel, so this never reflects a query
+// of the hardware, only what the app last told it to do.
 let lightsOn = false;
+
+// The one direction currently being sent (or null when stopped), per
+// grill/decisions.md's "interrupt semantics with active-direction
+// matching" decision. A new pointerdown overwrites this immediately
+// (interrupt, not queue); a stop-trigger event only sends Stop and clears
+// this if it matches the button that set it — a stale release from an
+// already-superseded button is a no-op.
+let activeDirection: Exclude<MovementDirection, "stop"> | null = null;
+
+const MOVEMENT_BUTTON_IDS: Record<Exclude<MovementDirection, "stop">, string> = {
+  forward: "move-forward",
+  backward: "move-backward",
+  left: "move-left",
+  right: "move-right",
+  "rotate-left": "rotate-left",
+  "rotate-right": "rotate-right",
+};
 
 function render(state: ConnectionState): void {
   const button = document.getElementById("toggle-button") as HTMLButtonElement;
@@ -55,17 +80,23 @@ function render(state: ConnectionState): void {
   statusText.className = uiState.statusClass;
 
   renderLights(state);
+  renderMovement(state);
 }
 
 function renderLights(state: ConnectionState): void {
-  const leftButton = document.getElementById("light-left-button") as HTMLButtonElement;
-  const rightButton = document.getElementById("light-right-button") as HTMLButtonElement;
+  const lightButton = document.getElementById("light-button") as HTMLButtonElement;
   const lightUiState = mapLightControlUiState(state, lightsOn);
 
-  leftButton.textContent = `Left Light: ${lightUiState.stateLabel}`;
-  leftButton.disabled = lightUiState.disabled;
-  rightButton.textContent = `Right Light: ${lightUiState.stateLabel}`;
-  rightButton.disabled = lightUiState.disabled;
+  lightButton.textContent = `Lights: ${lightUiState.stateLabel}`;
+  lightButton.disabled = lightUiState.disabled;
+}
+
+function renderMovement(state: ConnectionState): void {
+  const movementUiState = mapMovementControlUiState(state);
+
+  for (const id of Object.values(MOVEMENT_BUTTON_IDS)) {
+    (document.getElementById(id) as HTMLButtonElement).disabled = movementUiState.disabled;
+  }
 }
 
 function handleToggleClick(): void {
@@ -97,11 +128,70 @@ function handleLightToggleClick(): void {
   });
 }
 
+function sendMovement(direction: MovementDirection): void {
+  window.carAPI.setMovement(direction).catch((error: unknown) => {
+    console.error("Set movement failed:", error);
+  });
+}
+
+// pointerdown always interrupts: overwrite activeDirection and send the new
+// direction immediately, even if another direction is currently active, per
+// grill/decisions.md's interrupt-semantics decision.
+function handleMovementPointerDown(direction: Exclude<MovementDirection, "stop">): void {
+  activeDirection = direction;
+  sendMovement(direction);
+}
+
+// pointerup/pointerleave/pointercancel all funnel through here. Only the
+// event whose direction matches the currently-tracked activeDirection may
+// send Stop and clear it — a release from a since-superseded button is a
+// no-op, so releasing an old button after pressing a new one doesn't stop
+// the still-held new direction.
+function handleMovementRelease(direction: Exclude<MovementDirection, "stop">): void {
+  if (activeDirection !== direction) {
+    return;
+  }
+  activeDirection = null;
+  sendMovement("stop");
+}
+
+// Used by window.blur: the connection is still live here, so this is the
+// safety net for "user alt-tabbed away while holding a direction" — not tied
+// to a specific button, so any active direction (whichever it is) gets
+// stopped. The firmware has no watchdog for CMD_RUN (see ADR-001).
+function stopActiveMovement(): void {
+  if (activeDirection === null) {
+    return;
+  }
+  activeDirection = null;
+  sendMovement("stop");
+}
+
+// Used by the onStatus connection-drop path only: once the session leaves
+// connected+tcp100, CarConnection.setMovement() already rejects synchronously
+// (see ADR-001/setLedState's gating contract), so sending Stop here would be
+// a pointless IPC round-trip that's guaranteed to fail — this is a pure local
+// state reset, not a new Stop-sending path.
+function clearActiveMovement(): void {
+  activeDirection = null;
+}
+
 render(currentState);
 
 document.getElementById("toggle-button")!.addEventListener("click", handleToggleClick);
-document.getElementById("light-left-button")!.addEventListener("click", handleLightToggleClick);
-document.getElementById("light-right-button")!.addEventListener("click", handleLightToggleClick);
+document.getElementById("light-button")!.addEventListener("click", handleLightToggleClick);
+
+for (const [direction, id] of Object.entries(MOVEMENT_BUTTON_IDS) as Array<
+  [Exclude<MovementDirection, "stop">, string]
+>) {
+  const button = document.getElementById(id)!;
+  button.addEventListener("pointerdown", () => handleMovementPointerDown(direction));
+  button.addEventListener("pointerup", () => handleMovementRelease(direction));
+  button.addEventListener("pointerleave", () => handleMovementRelease(direction));
+  button.addEventListener("pointercancel", () => handleMovementRelease(direction));
+}
+
+window.addEventListener("blur", stopActiveMovement);
 
 window.carAPI.onStatus((state) => {
   // Reset the assumed light state to "off" on every fresh connect/reconnect,
@@ -112,6 +202,16 @@ window.carAPI.onStatus((state) => {
   if (state.status === "connected" || state.status === "disconnected" || state.status === "error") {
     lightsOn = false;
   }
+
+  // Movement commands only work over an active tcp100 session — if the
+  // connection leaves that state while a direction is held (disconnect,
+  // error, or falling back to http80), clear the local tracking rather than
+  // leave it pointing at a direction that's no longer reachable. No Stop is
+  // sent: the socket is already gone or about to be, per ADR-001.
+  if (state.status !== "connected" || state.protocol !== "tcp100") {
+    clearActiveMovement();
+  }
+
   currentState = state;
   render(state);
 });

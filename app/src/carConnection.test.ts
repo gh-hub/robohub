@@ -4,6 +4,7 @@ import * as net from "node:net";
 import { afterEach, test } from "node:test";
 
 import { CarConnection } from "./carConnection.ts";
+import type { MovementDirection } from "./commandFrame.ts";
 
 // Short timeout so refused/unreachable-port scenarios resolve fast; the
 // production default (carConfig.CAR_PROBE_TIMEOUT_MS) is tuned for a real
@@ -437,6 +438,69 @@ test("setLedState() rejects without writing to the socket on an http80 session",
 
   // Only the initial probe GET should have hit the mock server — no
   // additional request/write was attempted by the rejected setLedState() call.
+  assert.equal(requestCount, 1);
+
+  await connection.disconnect();
+});
+
+// Per ADR-001 (.gh-workflows/plans/20260815_065830-car-movement-light-controls/grill/ADR-001.md),
+// every movement direction's exact wire value.
+const MOVEMENT_FRAME_CASES: Array<[direction: MovementDirection, value: number]> = [
+  ["stop", 0x00],
+  ["forward", 0x01],
+  ["backward", 0x02],
+  ["left", 0x03],
+  ["right", 0x04],
+  ["rotate-left", 0x09],
+  ["rotate-right", 0x0a],
+];
+
+for (const [direction, value] of MOVEMENT_FRAME_CASES) {
+  test(`setMovement("${direction}") writes the exact ADR-001 motor frame to the TCP socket`, async () => {
+    const { ready, onConnection } = captureServerSocket();
+    const tcpPort = await startMockTcpServer(onConnection);
+    const connection = new CarConnection({
+      host: "127.0.0.1",
+      tcpPort,
+      httpPort: CLOSED_HTTP_PORT,
+      timeoutMs: TEST_TIMEOUT_MS,
+    });
+
+    const [serverSocket] = await Promise.all([ready, connection.connect()]);
+    const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
+    await connection.setMovement(direction);
+
+    assert.deepEqual(
+      [...(await receivedData)],
+      [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x0c, 0x00, value],
+    );
+  });
+}
+
+test("setMovement() rejects without writing to the socket when disconnected", async () => {
+  const connection = new CarConnection({ timeoutMs: TEST_TIMEOUT_MS });
+
+  await assert.rejects(() => connection.setMovement("forward"), /status is "disconnected"/);
+});
+
+test("setMovement() rejects without writing to the socket on an http80 session", async () => {
+  let requestCount = 0;
+  const httpPort = await startMockHttpServer(() => {
+    requestCount += 1;
+  });
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort: CLOSED_TCP_PORT,
+    httpPort,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+  await connection.connect();
+  assert.equal(connection.getState().protocol, "http80");
+
+  await assert.rejects(() => connection.setMovement("forward"), /protocol is "http80"/);
+
+  // Only the initial probe GET should have hit the mock server — no
+  // additional request/write was attempted by the rejected setMovement() call.
   assert.equal(requestCount, 1);
 
   await connection.disconnect();
