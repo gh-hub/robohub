@@ -14,7 +14,13 @@ test("isUsbSerialDevicePresent returns true when a cu.usbserial-* entry exists i
   const dir = makeTempDeviceDir();
   writeFileSync(path.join(dir, "cu.usbserial-1420"), "");
 
-  assert.equal(isUsbSerialDevicePresent(dir), true);
+  const originalPlatform = process.platform;
+  Object.defineProperty(process, "platform", { value: "darwin" });
+  try {
+    assert.equal(isUsbSerialDevicePresent(dir), true);
+  } finally {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+  }
 });
 
 test("isUsbSerialDevicePresent returns false when no cu.usbserial-* entry exists", () => {

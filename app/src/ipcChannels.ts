@@ -9,5 +9,5 @@ export const CAR_STATUS_CHANNEL = "car:status";
 export const CAR_SET_LIGHTS_CHANNEL = "car:set-lights";
 export const CAR_SET_MOVEMENT_CHANNEL = "car:set-movement";
 export const CAR_SHOOT_CHANNEL = "car:shoot";
-export const CAR_SET_AIM_ANGLE_CHANNEL = "car:set-aim-angle";
+export const CAR_SET_PAN_ANGLE_CHANNEL = "car:set-pan-angle";
 export const CAR_USB_STATUS_CHANNEL = "car:usb-status";

@@ -13,7 +13,7 @@ export interface CarConnectionLike {
   setLedState(on: boolean): Promise<void>;
   setMovement(direction: MovementDirection): Promise<void>;
   shoot(): Promise<void>;
-  setAimAngle(angle: number): Promise<void>;
+  setPanAngle(angle: number): Promise<void>;
   getState(): ConnectionState;
   on(event: "state-change", listener: (state: ConnectionState) => void): unknown;
   off(event: "state-change", listener: (state: ConnectionState) => void): unknown;
@@ -25,15 +25,15 @@ export interface CarIpcHandlers {
   handleSetLights: (on: boolean) => Promise<void>;
   handleSetMovement: (direction: MovementDirection) => Promise<void>;
   handleShoot: () => Promise<void>;
-  handleSetAimAngle: (angle: number) => Promise<void>;
+  handleSetPanAngle: (angle: number) => Promise<void>;
 }
 
 // Firmware-supported servo range, per ADR-001 at
 // .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md —
 // angles outside this range risk servo over-drive via the firmware's
 // map(angle, 1, 180, 130, 70) extrapolation.
-const MIN_AIM_ANGLE = 1;
-const MAX_AIM_ANGLE = 180;
+const MIN_PAN_ANGLE = 1;
+const MAX_PAN_ANGLE = 180;
 
 /**
  * Plain, Electron-free handler functions for the `connect`/`disconnect`
@@ -76,8 +76,8 @@ const MAX_AIM_ANGLE = 180;
  * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
  * It takes no arguments, so there is no allowlist check to perform here.
  *
- * `handleSetAimAngle` follows the same resolve-once-initiated contract via
- * `CarConnection.setAimAngle()`, which shares `setLedState()`'s
+ * `handleSetPanAngle` follows the same resolve-once-initiated contract via
+ * `CarConnection.setPanAngle()`, which shares `setLedState()`'s
  * `sendCommandFrame()` gating/rejection shape exactly (see the same
  * ADR-001). It additionally validates `angle` is an integer in [1, 180]
  * before calling through: `angle: number` is only a compile-time
@@ -98,11 +98,11 @@ export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandl
       return connection.setMovement(direction);
     },
     handleShoot: () => connection.shoot(),
-    handleSetAimAngle: (angle: number) => {
-      if (!isValidAimAngle(angle)) {
-        return Promise.reject(new Error(`Invalid aim angle: ${String(angle)}`));
+    handleSetPanAngle: (angle: number) => {
+      if (!isValidPanAngle(angle)) {
+        return Promise.reject(new Error(`Invalid pan angle: ${String(angle)}`));
       }
-      return connection.setAimAngle(angle);
+      return connection.setPanAngle(angle);
     },
   };
 }
@@ -119,12 +119,12 @@ function isMovementDirection(value: unknown): value is MovementDirection {
 
 /**
  * Runtime bounds check for the `angle` value received over the
- * `car:set-aim-angle` IPC channel, per ADR-001's [1, 180] firmware-safe
+ * `car:set-pan-angle` IPC channel, per ADR-001's [1, 180] firmware-safe
  * range. `Number.isInteger` also rejects `NaN`/`Infinity` and non-numbers,
  * so no separate `typeof` check is needed.
  */
-function isValidAimAngle(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= MIN_AIM_ANGLE && (value as number) <= MAX_AIM_ANGLE;
+function isValidPanAngle(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= MIN_PAN_ANGLE && (value as number) <= MAX_PAN_ANGLE;
 }
 
 /**

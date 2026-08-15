@@ -565,7 +565,7 @@ test("shoot() rejects without writing to the socket on an http80 session", async
 const SERVO_FRAME_CASES: number[] = [1, 5, 45, 90, 135, 179, 180];
 
 for (const angle of SERVO_FRAME_CASES) {
-  test(`setAimAngle(${angle}) writes the exact ADR-001 servo frame to the TCP socket`, async () => {
+  test(`setPanAngle(${angle}) writes the exact ADR-001 servo frame to the TCP socket`, async () => {
     const { ready, onConnection } = captureServerSocket();
     const tcpPort = await startMockTcpServer(onConnection);
     const connection = new CarConnection({
@@ -577,7 +577,7 @@ for (const angle of SERVO_FRAME_CASES) {
 
     const [serverSocket] = await Promise.all([ready, connection.connect()]);
     const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
-    await connection.setAimAngle(angle);
+    await connection.setPanAngle(angle);
 
     assert.deepEqual(
       [...(await receivedData)],
@@ -586,13 +586,13 @@ for (const angle of SERVO_FRAME_CASES) {
   });
 }
 
-test("setAimAngle() rejects without writing to the socket when disconnected", async () => {
+test("setPanAngle() rejects without writing to the socket when disconnected", async () => {
   const connection = new CarConnection({ timeoutMs: TEST_TIMEOUT_MS });
 
-  await assert.rejects(() => connection.setAimAngle(90), /status is "disconnected"/);
+  await assert.rejects(() => connection.setPanAngle(90), /status is "disconnected"/);
 });
 
-test("setAimAngle() rejects without writing to the socket on an http80 session", async () => {
+test("setPanAngle() rejects without writing to the socket on an http80 session", async () => {
   let requestCount = 0;
   const httpPort = await startMockHttpServer(() => {
     requestCount += 1;
@@ -606,10 +606,10 @@ test("setAimAngle() rejects without writing to the socket on an http80 session",
   await connection.connect();
   assert.equal(connection.getState().protocol, "http80");
 
-  await assert.rejects(() => connection.setAimAngle(90), /protocol is "http80"/);
+  await assert.rejects(() => connection.setPanAngle(90), /protocol is "http80"/);
 
   // Only the initial probe GET should have hit the mock server — no
-  // additional request/write was attempted by the rejected setAimAngle() call.
+  // additional request/write was attempted by the rejected setPanAngle() call.
   assert.equal(requestCount, 1);
 
   await connection.disconnect();

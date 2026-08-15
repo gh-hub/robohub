@@ -226,7 +226,7 @@ export class CarConnection extends EventEmitter {
   }
 
   /**
-   * Convenience wrapper over `sendCommandFrame()` for the QD005 aim servo
+   * Convenience wrapper over `sendCommandFrame()` for the QD005 pan servo
    * (see ADR-001 at
    * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
    * `angle` is sent as-is as the absolute-angle value byte — range
@@ -236,7 +236,7 @@ export class CarConnection extends EventEmitter {
    * gating/rejection contract as `setLedState()`/`setMovement()`/`shoot()`,
    * inherited from `sendCommandFrame()` rather than duplicated here.
    */
-  async setAimAngle(angle: number): Promise<void> {
+  async setPanAngle(angle: number): Promise<void> {
     await this.sendCommandFrame(
       buildCommandFrame({ action: CMD_RUN, device: DEVICE_SERVO, value: angle }),
     );

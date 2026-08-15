@@ -26,7 +26,7 @@ const CAR_STATUS_CHANNEL = "car:status";
 const CAR_SET_LIGHTS_CHANNEL = "car:set-lights";
 const CAR_SET_MOVEMENT_CHANNEL = "car:set-movement";
 const CAR_SHOOT_CHANNEL = "car:shoot";
-const CAR_SET_AIM_ANGLE_CHANNEL = "car:set-aim-angle";
+const CAR_SET_PAN_ANGLE_CHANNEL = "car:set-pan-angle";
 const CAR_USB_STATUS_CHANNEL = "car:usb-status";
 
 export interface CarApi {
@@ -63,13 +63,13 @@ export interface CarApi {
    * exact rejection contract. Takes no arguments: the firmware ignores the
    * value byte for this device (see ADR-001). */
   shoot: () => Promise<void>;
-  /** Sends an absolute aim-servo angle command frame. Resolves once the
+  /** Sends an absolute pan-servo angle command frame. Resolves once the
    * frame has been written to the socket; rejects (without writing) if
-   * there's no active tcp100 session — see `CarConnection.setAimAngle()`/
+   * there's no active tcp100 session — see `CarConnection.setPanAngle()`/
    * `sendCommandFrame()` for the exact rejection contract. `angle` must be
    * an integer in [1, 180]; the main-process handler validates this at the
    * IPC trust boundary and rejects otherwise (see ADR-001). */
-  setAimAngle: (angle: number) => Promise<void>;
+  setPanAngle: (angle: number) => Promise<void>;
   /** Subscribes to every USB-serial status push. Returns an unsubscribe
    * function. Per ADR-002, this is informational-only — there is no
    * initial-state query, so callers should assume "not connected" until
@@ -89,7 +89,7 @@ const carAPI: CarApi = {
   setLights: (on) => ipcRenderer.invoke(CAR_SET_LIGHTS_CHANNEL, on),
   setMovement: (direction) => ipcRenderer.invoke(CAR_SET_MOVEMENT_CHANNEL, direction),
   shoot: () => ipcRenderer.invoke(CAR_SHOOT_CHANNEL),
-  setAimAngle: (angle) => ipcRenderer.invoke(CAR_SET_AIM_ANGLE_CHANNEL, angle),
+  setPanAngle: (angle) => ipcRenderer.invoke(CAR_SET_PAN_ANGLE_CHANNEL, angle),
   onStatus: (callback) => {
     const listener = (_event: IpcRendererEvent, state: ConnectionState): void => callback(state);
     ipcRenderer.on(CAR_STATUS_CHANNEL, listener);

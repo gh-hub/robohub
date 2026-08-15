@@ -39,7 +39,7 @@ export const DEVICE_MOTOR = 0x0c;
 // this device code fires a fixed 200ms pulse regardless of value.
 export const DEVICE_SHOOT = 0x08;
 
-// Device code for the QD005 water gun's aim servo, reverse-engineered from
+// Device code for the QD005 water gun's pan servo, reverse-engineered from
 // the firmware's runModule() (see ADR-001 at
 // .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
 // The value byte is an absolute angle in degrees, 1-180 inclusive — the

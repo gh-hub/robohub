@@ -129,29 +129,29 @@ export function mapShootControlUiState(connection: ConnectionState): ShootContro
 
 // Firmware-supported servo range, per ADR-001 at
 // .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md.
-const MIN_AIM_ANGLE = 1;
-const MAX_AIM_ANGLE = 180;
+const MIN_PAN_ANGLE = 1;
+const MAX_PAN_ANGLE = 180;
 
-export interface AimControlUiState {
-  upDisabled: boolean;
-  downDisabled: boolean;
+export interface PanControlUiState {
+  leftDisabled: boolean;
+  rightDisabled: boolean;
 }
 
 /**
- * Pure `ConnectionState` + current angle -> Up/Down button UI state
- * mapping, per ADR-001's "Gating and enablement" decision — Aim reuses the
+ * Pure `ConnectionState` + current angle -> Left/Right button UI state
+ * mapping, per ADR-001's "Gating and enablement" decision — Pan reuses the
  * same `connected && tcp100` predicate as lights/movement/shoot, combined
  * with the angle-bound edge cases at 1 and 180 (per ADR-001's "Bounds"
- * decision: Up disabled at angle >= 180, Down disabled at angle <= 1).
+ * decision: Left disabled at angle >= 180, Right disabled at angle <= 1).
  * Either condition alone is enough to disable a button. The speed-dropdown
  * selection and the press-and-hold repeat timer are separate,
  * DOM-timer-driven concerns layered on top by the renderer — deliberately
  * not part of this pure, connection-state-and-angle-only mapping.
  */
-export function mapAimControlUiState(connection: ConnectionState, angle: number): AimControlUiState {
+export function mapPanControlUiState(connection: ConnectionState, angle: number): PanControlUiState {
   const connectionDisabled = connection.status !== "connected" || connection.protocol !== "tcp100";
   return {
-    upDisabled: connectionDisabled || angle >= MAX_AIM_ANGLE,
-    downDisabled: connectionDisabled || angle <= MIN_AIM_ANGLE,
+    leftDisabled: connectionDisabled || angle >= MAX_PAN_ANGLE,
+    rightDisabled: connectionDisabled || angle <= MIN_PAN_ANGLE,
   };
 }
