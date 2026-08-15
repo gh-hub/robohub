@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>ACEBOTT Control</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 2rem;
+      }
+
+      #toggle-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1.5rem;
+        cursor: pointer;
+      }
+
+      #toggle-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #light-controls {
+        margin-top: 1rem;
+      }
+
+      #light-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1.5rem;
+        margin-right: 0.5rem;
+        cursor: pointer;
+      }
+
+      #light-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #movement-controls {
+        margin-top: 1.5rem;
+      }
+
+      .dpad-cross {
+        display: grid;
+        grid-template-columns: repeat(3, 3.5rem);
+        grid-template-rows: repeat(3, 3.5rem);
+        gap: 0.25rem;
+      }
+
+      .dpad-cross button {
+        font-size: 1rem;
+        cursor: pointer;
+      }
+
+      .dpad-cross button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #move-forward {
+        grid-column: 2;
+        grid-row: 1;
+      }
+
+      #move-left {
+        grid-column: 1;
+        grid-row: 2;
+      }
+
+      #move-right {
+        grid-column: 3;
+        grid-row: 2;
+      }
+
+      #move-backward {
+        grid-column: 2;
+        grid-row: 3;
+      }
+
+      .dpad-rotate-row {
+        margin-top: 0.5rem;
+        display: flex;
+        gap: 0.25rem;
+      }
+
+      .dpad-rotate-row button {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+      }
+
+      .dpad-rotate-row button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #aim-controls {
+        margin-top: 1.5rem;
+      }
+
+      #aim-up-button,
+      #aim-down-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1rem;
+        margin-right: 0.5rem;
+        cursor: pointer;
+      }
+
+      #aim-up-button:disabled,
+      #aim-down-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #aim-speed-select {
+        font-size: 1rem;
+        padding: 0.4rem;
+        margin-right: 0.75rem;
+      }
+
+      #aim-angle-text {
+        font-weight: 600;
+      }
+
+      #shoot-controls {
+        margin-top: 1.5rem;
+      }
+
+      #shoot-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1.5rem;
+        margin-right: 0.75rem;
+        cursor: pointer;
+      }
+
+      #shoot-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #shoot-cooldown-toggle-label {
+        cursor: pointer;
+      }
+
+      #status-text {
+        display: inline-block;
+        margin-left: 1rem;
+        font-weight: 600;
+      }
+
+      .status-disconnected {
+        color: #666666;
+      }
+
+      .status-connecting {
+        color: #b8860b;
+      }
+
+      .status-connected {
+        color: #1a7f37;
+      }
+
+      .status-error {
+        color: #cf222e;
+      }
+
+      #usb-status-text {
+        display: inline-block;
+        margin-left: 1rem;
+        font-weight: 600;
+      }
+
+      .usb-status-disconnected {
+        color: #666666;
+      }
+
+      .usb-status-connected {
+        color: #1a7f37;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ACEBOTT Control</h1>
+    <button id="toggle-button" type="button">Connect</button>
+    <span id="status-text" class="status-disconnected">Disconnected</span>
+    <span id="usb-status-text" class="usb-status-disconnected">USB: Not connected</span>
+    <div id="light-controls">
+      <button id="light-button" type="button" disabled>Lights: Off</button>
+    </div>
+    <div id="movement-controls">
+      <div class="dpad-cross">
+        <button id="move-forward" type="button" disabled>&#9650;</button>
+        <button id="move-left" type="button" disabled>&#9664;</button>
+        <button id="move-right" type="button" disabled>&#9654;</button>
+        <button id="move-backward" type="button" disabled>&#9660;</button>
+      </div>
+      <div class="dpad-rotate-row">
+        <button id="rotate-left" type="button" disabled>&#8634; Rotate Left</button>
+        <button id="rotate-right" type="button" disabled>&#8635; Rotate Right</button>
+      </div>
+    </div>
+    <div id="aim-controls">
+      <button id="aim-up-button" type="button" disabled>&#9650; Up</button>
+      <button id="aim-down-button" type="button" disabled>&#9660; Down</button>
+      <select id="aim-speed-select">
+        <option value="fast" selected>Fast</option>
+        <option value="slow">Slow</option>
+      </select>
+      <span id="aim-angle-text">Aim: 90°</span>
+    </div>
+    <div id="shoot-controls">
+      <button id="shoot-button" type="button" disabled>Shoot</button>
+      <label id="shoot-cooldown-toggle-label">
+        <input type="checkbox" id="shoot-cooldown-toggle" checked />
+        Cooldown
+      </label>
+    </div>
+    <script type="module" src="../dist/renderer.js"></script>
+  </body>
+</html>

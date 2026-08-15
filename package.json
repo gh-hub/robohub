@@ -1,0 +1,11 @@
+{
+  "name": "robohub",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build --prefix app",
+    "start": "npm run start --prefix app",
+    "typecheck": "npm run typecheck --prefix app",
+    "test": "npm run test --prefix app"
+  }
+}
