@@ -5,7 +5,7 @@ Fix the QD005 water-gun aim control (mislabeled as up/down when it actually pans
 
 ## Status
 Workflow: full
-Current phase: fixing (review round-1)
+Current phase: complete
 
 ## Links
 - [PROGRESS/](PROGRESS/INDEX.md)
@@ -17,3 +17,4 @@ Current phase: fixing (review round-1)
   - [02 — Discrete rotate buttons (90°/180° Left/Right)](tickets/02-discrete-rotate-buttons.md)
 - [Review](review/):
   - [Round 1 findings](review/round-1/findings.md) — FAIL (spec-match/security clean; test gate failed on a pre-existing, unrelated usbStatus.test.ts gap)
+  - Round 2 — PASS (spec-match clean, security clean, all gates green: build/typecheck/tests 149/149)

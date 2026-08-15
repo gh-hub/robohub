@@ -13,6 +13,7 @@ Fix the QD005 water-gun aim control (mislabeled as up/down when it actually pans
 Phase: review (round 2)
 Completed tickets: 01 — Pan rename (Aim → Pan); 02 — Discrete rotate buttons (90°/180° Left/Right); round-1 fix 01 — Fix failing usbStatus test on Windows
 Current ticket: (none)
+Plan complete.
 
 Review round 1 failed: spec-match and security both clean, but the unit/integration test gate failed (148/149) on a pre-existing, unrelated `usbStatus.test.ts` platform gap (test doesn't mock `process.platform` to `"darwin"`). Fixed in round-1-fix-01 (test-only change, mocked `process.platform` to `"darwin"` matching the sibling test's pattern) — all 149 tests now pass; typecheck and build remain clean. See [review/round-1/findings.md](review/round-1/findings.md) (historical) and [PROGRESS/notes/implement-round-1-fix-01-usbstatus-test.md](PROGRESS/notes/implement-round-1-fix-01-usbstatus-test.md).
 
