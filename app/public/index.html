@@ -94,6 +94,54 @@
         opacity: 0.6;
       }
 
+      #aim-controls {
+        margin-top: 1.5rem;
+      }
+
+      #aim-up-button,
+      #aim-down-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1rem;
+        margin-right: 0.5rem;
+        cursor: pointer;
+      }
+
+      #aim-up-button:disabled,
+      #aim-down-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #aim-speed-select {
+        font-size: 1rem;
+        padding: 0.4rem;
+        margin-right: 0.75rem;
+      }
+
+      #aim-angle-text {
+        font-weight: 600;
+      }
+
+      #shoot-controls {
+        margin-top: 1.5rem;
+      }
+
+      #shoot-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1.5rem;
+        margin-right: 0.75rem;
+        cursor: pointer;
+      }
+
+      #shoot-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #shoot-cooldown-toggle-label {
+        cursor: pointer;
+      }
+
       #status-text {
         display: inline-block;
         margin-left: 1rem;
@@ -115,12 +163,27 @@
       .status-error {
         color: #cf222e;
       }
+
+      #usb-status-text {
+        display: inline-block;
+        margin-left: 1rem;
+        font-weight: 600;
+      }
+
+      .usb-status-disconnected {
+        color: #666666;
+      }
+
+      .usb-status-connected {
+        color: #1a7f37;
+      }
     </style>
   </head>
   <body>
     <h1>ACEBOTT Control</h1>
     <button id="toggle-button" type="button">Connect</button>
     <span id="status-text" class="status-disconnected">Disconnected</span>
+    <span id="usb-status-text" class="usb-status-disconnected">USB: Not connected</span>
     <div id="light-controls">
       <button id="light-button" type="button" disabled>Lights: Off</button>
     </div>
@@ -135,6 +198,22 @@
         <button id="rotate-left" type="button" disabled>&#8634; Rotate Left</button>
         <button id="rotate-right" type="button" disabled>&#8635; Rotate Right</button>
       </div>
+    </div>
+    <div id="aim-controls">
+      <button id="aim-up-button" type="button" disabled>&#9650; Up</button>
+      <button id="aim-down-button" type="button" disabled>&#9660; Down</button>
+      <select id="aim-speed-select">
+        <option value="fast" selected>Fast</option>
+        <option value="slow">Slow</option>
+      </select>
+      <span id="aim-angle-text">Aim: 90°</span>
+    </div>
+    <div id="shoot-controls">
+      <button id="shoot-button" type="button" disabled>Shoot</button>
+      <label id="shoot-cooldown-toggle-label">
+        <input type="checkbox" id="shoot-cooldown-toggle" checked />
+        Cooldown
+      </label>
     </div>
     <script type="module" src="../dist/renderer.js"></script>
   </body>

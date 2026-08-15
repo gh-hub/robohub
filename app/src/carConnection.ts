@@ -15,7 +15,10 @@ import {
   CMD_RUN,
   DEVICE_LED,
   DEVICE_MOTOR,
+  DEVICE_SERVO,
+  DEVICE_SHOOT,
   MOVEMENT_VALUES,
+  SHOOT_VALUE,
   type MovementDirection,
 } from "./commandFrame.ts";
 
@@ -204,6 +207,38 @@ export class CarConnection extends EventEmitter {
   async setMovement(direction: MovementDirection): Promise<void> {
     await this.sendCommandFrame(
       buildCommandFrame({ action: CMD_RUN, device: DEVICE_MOTOR, value: MOVEMENT_VALUES[direction] }),
+    );
+  }
+
+  /**
+   * Convenience wrapper over `sendCommandFrame()` for the QD005 blaster
+   * trigger (see ADR-001 at
+   * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
+   * The value byte is ignored by the firmware, so `SHOOT_VALUE` is a fixed
+   * placeholder — same gating/rejection contract as `setLedState()`/
+   * `setMovement()`, inherited from `sendCommandFrame()` rather than
+   * duplicated here.
+   */
+  async shoot(): Promise<void> {
+    await this.sendCommandFrame(
+      buildCommandFrame({ action: CMD_RUN, device: DEVICE_SHOOT, value: SHOOT_VALUE }),
+    );
+  }
+
+  /**
+   * Convenience wrapper over `sendCommandFrame()` for the QD005 aim servo
+   * (see ADR-001 at
+   * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
+   * `angle` is sent as-is as the absolute-angle value byte — range
+   * validation (1-180) happens at the IPC trust boundary
+   * (`carIpcHandlers.ts`), not here, matching where `setMovement()`'s
+   * direction-allowlist check lives relative to this same class. Same
+   * gating/rejection contract as `setLedState()`/`setMovement()`/`shoot()`,
+   * inherited from `sendCommandFrame()` rather than duplicated here.
+   */
+  async setAimAngle(angle: number): Promise<void> {
+    await this.sendCommandFrame(
+      buildCommandFrame({ action: CMD_RUN, device: DEVICE_SERVO, value: angle }),
     );
   }
 

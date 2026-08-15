@@ -25,6 +25,9 @@ const CAR_DISCONNECT_CHANNEL = "car:disconnect";
 const CAR_STATUS_CHANNEL = "car:status";
 const CAR_SET_LIGHTS_CHANNEL = "car:set-lights";
 const CAR_SET_MOVEMENT_CHANNEL = "car:set-movement";
+const CAR_SHOOT_CHANNEL = "car:shoot";
+const CAR_SET_AIM_ANGLE_CHANNEL = "car:set-aim-angle";
+const CAR_USB_STATUS_CHANNEL = "car:usb-status";
 
 export interface CarApi {
   /** Initiates a connection attempt. Resolves once initiated; rejects if a
@@ -54,6 +57,24 @@ export interface CarApi {
    * pointerleave/pointercancel/window-blur, not just with the six movement
    * directions on pointerdown. */
   setMovement: (direction: MovementDirection) => Promise<void>;
+  /** Fires a single shoot pulse. Resolves once the frame has been written
+   * to the socket; rejects (without writing) if there's no active tcp100
+   * session — see `CarConnection.shoot()`/`sendCommandFrame()` for the
+   * exact rejection contract. Takes no arguments: the firmware ignores the
+   * value byte for this device (see ADR-001). */
+  shoot: () => Promise<void>;
+  /** Sends an absolute aim-servo angle command frame. Resolves once the
+   * frame has been written to the socket; rejects (without writing) if
+   * there's no active tcp100 session — see `CarConnection.setAimAngle()`/
+   * `sendCommandFrame()` for the exact rejection contract. `angle` must be
+   * an integer in [1, 180]; the main-process handler validates this at the
+   * IPC trust boundary and rejects otherwise (see ADR-001). */
+  setAimAngle: (angle: number) => Promise<void>;
+  /** Subscribes to every USB-serial status push. Returns an unsubscribe
+   * function. Per ADR-002, this is informational-only — there is no
+   * initial-state query, so callers should assume "not connected" until
+   * the first push, mirroring `onStatus`'s precedent. */
+  onUsbStatus: (callback: (connected: boolean) => void) => () => void;
 }
 
 declare global {
@@ -67,11 +88,20 @@ const carAPI: CarApi = {
   disconnect: () => ipcRenderer.invoke(CAR_DISCONNECT_CHANNEL),
   setLights: (on) => ipcRenderer.invoke(CAR_SET_LIGHTS_CHANNEL, on),
   setMovement: (direction) => ipcRenderer.invoke(CAR_SET_MOVEMENT_CHANNEL, direction),
+  shoot: () => ipcRenderer.invoke(CAR_SHOOT_CHANNEL),
+  setAimAngle: (angle) => ipcRenderer.invoke(CAR_SET_AIM_ANGLE_CHANNEL, angle),
   onStatus: (callback) => {
     const listener = (_event: IpcRendererEvent, state: ConnectionState): void => callback(state);
     ipcRenderer.on(CAR_STATUS_CHANNEL, listener);
     return () => {
       ipcRenderer.removeListener(CAR_STATUS_CHANNEL, listener);
+    };
+  },
+  onUsbStatus: (callback) => {
+    const listener = (_event: IpcRendererEvent, connected: boolean): void => callback(connected);
+    ipcRenderer.on(CAR_USB_STATUS_CHANNEL, listener);
+    return () => {
+      ipcRenderer.removeListener(CAR_USB_STATUS_CHANNEL, listener);
     };
   },
 };

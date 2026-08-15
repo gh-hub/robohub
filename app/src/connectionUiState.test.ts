@@ -3,9 +3,11 @@ import { test } from "node:test";
 
 import type { ConnectionState } from "./carConnection.ts";
 import {
+  mapAimControlUiState,
   mapConnectionStatusToUiState,
   mapLightControlUiState,
   mapMovementControlUiState,
+  mapShootControlUiState,
 } from "./connectionUiState.ts";
 
 test("disconnected state maps to an enabled Connect button and disconnected status text", () => {
@@ -127,4 +129,59 @@ for (const [name, state] of [
 
 test("movement buttons are enabled when connected over tcp100", () => {
   assert.equal(mapMovementControlUiState(CONNECTED_TCP100).disabled, false);
+});
+
+for (const [name, state] of [
+  ["disconnected", DISCONNECTED],
+  ["connecting", CONNECTING],
+  ["connected over http80", CONNECTED_HTTP80],
+  ["error", ERROR],
+] as const) {
+  test(`shoot button is disabled when connection is ${name}`, () => {
+    assert.equal(mapShootControlUiState(state).disabled, true);
+  });
+}
+
+test("shoot button is enabled when connected over tcp100", () => {
+  assert.equal(mapShootControlUiState(CONNECTED_TCP100).disabled, false);
+});
+
+for (const [name, state] of [
+  ["disconnected", DISCONNECTED],
+  ["connecting", CONNECTING],
+  ["connected over http80", CONNECTED_HTTP80],
+  ["error", ERROR],
+] as const) {
+  test(`aim Up/Down buttons are both disabled when connection is ${name}, regardless of angle`, () => {
+    assert.equal(mapAimControlUiState(state, 90).upDisabled, true);
+    assert.equal(mapAimControlUiState(state, 90).downDisabled, true);
+  });
+}
+
+test("aim Up/Down buttons are both enabled when connected over tcp100 at a mid-range angle", () => {
+  const uiState = mapAimControlUiState(CONNECTED_TCP100, 90);
+
+  assert.equal(uiState.upDisabled, false);
+  assert.equal(uiState.downDisabled, false);
+});
+
+test("aim Up button is disabled at the 180 upper bound", () => {
+  assert.equal(mapAimControlUiState(CONNECTED_TCP100, 180).upDisabled, true);
+});
+
+test("aim Down button stays enabled at the 180 upper bound", () => {
+  assert.equal(mapAimControlUiState(CONNECTED_TCP100, 180).downDisabled, false);
+});
+
+test("aim Down button is disabled at the 1 lower bound", () => {
+  assert.equal(mapAimControlUiState(CONNECTED_TCP100, 1).downDisabled, true);
+});
+
+test("aim Up button stays enabled at the 1 lower bound", () => {
+  assert.equal(mapAimControlUiState(CONNECTED_TCP100, 1).upDisabled, false);
+});
+
+test("aim Up/Down buttons are both disabled at the bounds when also disconnected", () => {
+  assert.equal(mapAimControlUiState(DISCONNECTED, 180).upDisabled, true);
+  assert.equal(mapAimControlUiState(DISCONNECTED, 1).downDisabled, true);
 });

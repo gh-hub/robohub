@@ -34,12 +34,16 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   disconnectCallCount = 0;
   setLedStateCalls: boolean[] = [];
   setMovementCalls: MovementDirection[] = [];
+  shootCallCount = 0;
+  setAimAngleCalls: number[] = [];
 
   private state: ConnectionState;
   private readonly connectImpl: () => Promise<void>;
   private readonly disconnectImpl: () => Promise<void>;
   private readonly setLedStateImpl: (on: boolean) => Promise<void>;
   private readonly setMovementImpl: (direction: MovementDirection) => Promise<void>;
+  private readonly shootImpl: () => Promise<void>;
+  private readonly setAimAngleImpl: (angle: number) => Promise<void>;
 
   constructor(options: {
     initialState?: ConnectionState;
@@ -47,6 +51,8 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
     onDisconnect?: () => Promise<void>;
     onSetLedState?: (on: boolean) => Promise<void>;
     onSetMovement?: (direction: MovementDirection) => Promise<void>;
+    onShoot?: () => Promise<void>;
+    onSetAimAngle?: (angle: number) => Promise<void>;
   } = {}) {
     super();
     this.state = options.initialState ?? { ...DISCONNECTED_STATE };
@@ -54,6 +60,8 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
     this.disconnectImpl = options.onDisconnect ?? (async () => this.setState(DISCONNECTED_STATE));
     this.setLedStateImpl = options.onSetLedState ?? (async () => {});
     this.setMovementImpl = options.onSetMovement ?? (async () => {});
+    this.shootImpl = options.onShoot ?? (async () => {});
+    this.setAimAngleImpl = options.onSetAimAngle ?? (async () => {});
   }
 
   getState(): ConnectionState {
@@ -78,6 +86,16 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   async setMovement(direction: MovementDirection): Promise<void> {
     this.setMovementCalls.push(direction);
     await this.setMovementImpl(direction);
+  }
+
+  async shoot(): Promise<void> {
+    this.shootCallCount += 1;
+    await this.shootImpl();
+  }
+
+  async setAimAngle(angle: number): Promise<void> {
+    this.setAimAngleCalls.push(angle);
+    await this.setAimAngleImpl(angle);
   }
 
   setState(next: ConnectionState): void {
@@ -231,6 +249,75 @@ test("handleSetMovement rejects when connection.setMovement() rejects", async ()
   const handlers = createCarIpcHandlers(connection);
 
   await assert.rejects(() => handlers.handleSetMovement("forward"), /sendCommandFrame/);
+});
+
+test("handleShoot calls connection.shoot() exactly once", async () => {
+  const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+  const handlers = createCarIpcHandlers(connection);
+
+  await handlers.handleShoot();
+
+  assert.equal(connection.shootCallCount, 1);
+});
+
+test("handleShoot rejects when connection.shoot() rejects", async () => {
+  const connection = new FakeCarConnection({
+    onShoot: async () => {
+      throw new Error('sendCommandFrame() called while status is "disconnected" and protocol is "null"');
+    },
+  });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(() => handlers.handleShoot(), /sendCommandFrame/);
+});
+
+const VALID_AIM_ANGLES = [1, 5, 45, 90, 135, 179, 180];
+
+for (const angle of VALID_AIM_ANGLES) {
+  test(`handleSetAimAngle calls connection.setAimAngle(${angle})`, async () => {
+    const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+    const handlers = createCarIpcHandlers(connection);
+
+    await handlers.handleSetAimAngle(angle);
+
+    assert.deepEqual(connection.setAimAngleCalls, [angle]);
+  });
+}
+
+const INVALID_AIM_ANGLES = [0, -1, 181, 500, 1.5, NaN, Infinity, -Infinity];
+
+for (const angle of INVALID_AIM_ANGLES) {
+  test(`handleSetAimAngle rejects out-of-range angle ${angle} without reaching connection.setAimAngle()`, async () => {
+    const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+    const handlers = createCarIpcHandlers(connection);
+
+    await assert.rejects(() => handlers.handleSetAimAngle(angle), /Invalid aim angle/);
+
+    assert.deepEqual(connection.setAimAngleCalls, []);
+  });
+}
+
+test("handleSetAimAngle rejects a non-number angle without reaching connection.setAimAngle()", async () => {
+  const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(
+    () => handlers.handleSetAimAngle("90" as unknown as number),
+    /Invalid aim angle/,
+  );
+
+  assert.deepEqual(connection.setAimAngleCalls, []);
+});
+
+test("handleSetAimAngle rejects when connection.setAimAngle() rejects", async () => {
+  const connection = new FakeCarConnection({
+    onSetAimAngle: async () => {
+      throw new Error('sendCommandFrame() called while status is "disconnected" and protocol is "null"');
+    },
+  });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(() => handlers.handleSetAimAngle(90), /sendCommandFrame/);
 });
 
 test("forwardConnectionStatus forwards every state-change event", () => {

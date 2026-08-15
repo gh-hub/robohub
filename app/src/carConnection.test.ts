@@ -506,6 +506,115 @@ test("setMovement() rejects without writing to the socket on an http80 session",
   await connection.disconnect();
 });
 
+// Per water-gun-control ADR-001
+// (.gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md),
+// the shoot command's exact wire bytes and gating contract.
+test("shoot() writes the exact ADR-001 shoot frame to the TCP socket", async () => {
+  const { ready, onConnection } = captureServerSocket();
+  const tcpPort = await startMockTcpServer(onConnection);
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort,
+    httpPort: CLOSED_HTTP_PORT,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+
+  const [serverSocket] = await Promise.all([ready, connection.connect()]);
+  const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
+  await connection.shoot();
+
+  assert.deepEqual(
+    [...(await receivedData)],
+    [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x08, 0x00, 0x00],
+  );
+});
+
+test("shoot() rejects without writing to the socket when disconnected", async () => {
+  const connection = new CarConnection({ timeoutMs: TEST_TIMEOUT_MS });
+
+  await assert.rejects(() => connection.shoot(), /status is "disconnected"/);
+});
+
+test("shoot() rejects without writing to the socket on an http80 session", async () => {
+  let requestCount = 0;
+  const httpPort = await startMockHttpServer(() => {
+    requestCount += 1;
+  });
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort: CLOSED_TCP_PORT,
+    httpPort,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+  await connection.connect();
+  assert.equal(connection.getState().protocol, "http80");
+
+  await assert.rejects(() => connection.shoot(), /protocol is "http80"/);
+
+  // Only the initial probe GET should have hit the mock server — no
+  // additional request/write was attempted by the rejected shoot() call.
+  assert.equal(requestCount, 1);
+
+  await connection.disconnect();
+});
+
+// Per water-gun-control ADR-001
+// (.gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md),
+// the servo command's exact wire bytes and gating contract, across
+// representative angles including both bounds.
+const SERVO_FRAME_CASES: number[] = [1, 5, 45, 90, 135, 179, 180];
+
+for (const angle of SERVO_FRAME_CASES) {
+  test(`setAimAngle(${angle}) writes the exact ADR-001 servo frame to the TCP socket`, async () => {
+    const { ready, onConnection } = captureServerSocket();
+    const tcpPort = await startMockTcpServer(onConnection);
+    const connection = new CarConnection({
+      host: "127.0.0.1",
+      tcpPort,
+      httpPort: CLOSED_HTTP_PORT,
+      timeoutMs: TEST_TIMEOUT_MS,
+    });
+
+    const [serverSocket] = await Promise.all([ready, connection.connect()]);
+    const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
+    await connection.setAimAngle(angle);
+
+    assert.deepEqual(
+      [...(await receivedData)],
+      [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, angle],
+    );
+  });
+}
+
+test("setAimAngle() rejects without writing to the socket when disconnected", async () => {
+  const connection = new CarConnection({ timeoutMs: TEST_TIMEOUT_MS });
+
+  await assert.rejects(() => connection.setAimAngle(90), /status is "disconnected"/);
+});
+
+test("setAimAngle() rejects without writing to the socket on an http80 session", async () => {
+  let requestCount = 0;
+  const httpPort = await startMockHttpServer(() => {
+    requestCount += 1;
+  });
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort: CLOSED_TCP_PORT,
+    httpPort,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+  await connection.connect();
+  assert.equal(connection.getState().protocol, "http80");
+
+  await assert.rejects(() => connection.setAimAngle(90), /protocol is "http80"/);
+
+  // Only the initial probe GET should have hit the mock server — no
+  // additional request/write was attempted by the rejected setAimAngle() call.
+  assert.equal(requestCount, 1);
+
+  await connection.disconnect();
+});
+
 test("an abrupt remote close (socket error) while connected is detected as error", async () => {
   const tcpPort = await startMockTcpServer((socket) => {
     // resetAndDestroy() sends an actual RST packet, which is what makes the

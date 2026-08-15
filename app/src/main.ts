@@ -7,10 +7,14 @@ import type { MovementDirection } from "./commandFrame.ts";
 import {
   CAR_CONNECT_CHANNEL,
   CAR_DISCONNECT_CHANNEL,
+  CAR_SET_AIM_ANGLE_CHANNEL,
   CAR_SET_LIGHTS_CHANNEL,
   CAR_SET_MOVEMENT_CHANNEL,
+  CAR_SHOOT_CHANNEL,
   CAR_STATUS_CHANNEL,
+  CAR_USB_STATUS_CHANNEL,
 } from "./ipcChannels.ts";
+import { isUsbSerialDevicePresent, startUsbStatusPolling } from "./usbStatus.ts";
 
 // Single, app-lifetime connection instance — per ADR-002, the main process
 // is the sole owner of the car's TCP socket. `new CarConnection()` (no
@@ -25,6 +29,10 @@ ipcMain.handle(CAR_DISCONNECT_CHANNEL, () => carIpcHandlers.handleDisconnect());
 ipcMain.handle(CAR_SET_LIGHTS_CHANNEL, (_event, on: boolean) => carIpcHandlers.handleSetLights(on));
 ipcMain.handle(CAR_SET_MOVEMENT_CHANNEL, (_event, direction: MovementDirection) =>
   carIpcHandlers.handleSetMovement(direction),
+);
+ipcMain.handle(CAR_SHOOT_CHANNEL, () => carIpcHandlers.handleShoot());
+ipcMain.handle(CAR_SET_AIM_ANGLE_CHANNEL, (_event, angle: number) =>
+  carIpcHandlers.handleSetAimAngle(angle),
 );
 
 function createWindow(): void {
@@ -49,7 +57,19 @@ function createWindow(): void {
   const stopForwardingStatus = forwardConnectionStatus(carConnection, (state) => {
     window.webContents.send(CAR_STATUS_CHANNEL, state);
   });
-  window.on("closed", stopForwardingStatus);
+
+  // USB status badge, per ADR-002: an independent, polled, informational
+  // signal unrelated to the Wi-Fi/TCP connection lifecycle above — it does
+  // not share carConnection or CAR_STATUS_CHANNEL. Same unsubscribe-on-close
+  // discipline as stopForwardingStatus.
+  const stopUsbStatusPolling = startUsbStatusPolling(isUsbSerialDevicePresent, (connected) => {
+    window.webContents.send(CAR_USB_STATUS_CHANNEL, connected);
+  });
+
+  window.on("closed", () => {
+    stopForwardingStatus();
+    stopUsbStatusPolling();
+  });
 
   window.loadFile(path.join(__dirname, "..", "public", "index.html"));
 }

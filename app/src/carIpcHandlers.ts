@@ -12,6 +12,8 @@ export interface CarConnectionLike {
   disconnect(): Promise<void>;
   setLedState(on: boolean): Promise<void>;
   setMovement(direction: MovementDirection): Promise<void>;
+  shoot(): Promise<void>;
+  setAimAngle(angle: number): Promise<void>;
   getState(): ConnectionState;
   on(event: "state-change", listener: (state: ConnectionState) => void): unknown;
   off(event: "state-change", listener: (state: ConnectionState) => void): unknown;
@@ -22,7 +24,16 @@ export interface CarIpcHandlers {
   handleDisconnect: () => Promise<void>;
   handleSetLights: (on: boolean) => Promise<void>;
   handleSetMovement: (direction: MovementDirection) => Promise<void>;
+  handleShoot: () => Promise<void>;
+  handleSetAimAngle: (angle: number) => Promise<void>;
 }
+
+// Firmware-supported servo range, per ADR-001 at
+// .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md —
+// angles outside this range risk servo over-drive via the firmware's
+// map(angle, 1, 180, 130, 70) extrapolation.
+const MIN_AIM_ANGLE = 1;
+const MAX_AIM_ANGLE = 180;
 
 /**
  * Plain, Electron-free handler functions for the `connect`/`disconnect`
@@ -58,6 +69,22 @@ export interface CarIpcHandlers {
  * compromised or buggy renderer can send any string over
  * `ipcMain.handle`, so the check has to happen at runtime here rather
  * than being assumed from the type.
+ *
+ * `handleShoot` follows the same resolve-once-initiated contract via
+ * `CarConnection.shoot()`, which shares `setLedState()`'s
+ * `sendCommandFrame()` gating/rejection shape exactly (see ADR-001 at
+ * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
+ * It takes no arguments, so there is no allowlist check to perform here.
+ *
+ * `handleSetAimAngle` follows the same resolve-once-initiated contract via
+ * `CarConnection.setAimAngle()`, which shares `setLedState()`'s
+ * `sendCommandFrame()` gating/rejection shape exactly (see the same
+ * ADR-001). It additionally validates `angle` is an integer in [1, 180]
+ * before calling through: `angle: number` is only a compile-time
+ * annotation, and this handler sits at the IPC trust boundary — a
+ * compromised or buggy renderer can send any value over `ipcMain.handle`,
+ * so the check has to happen at runtime here rather than being assumed
+ * from the type, matching `handleSetMovement`'s direction-allowlist check.
  */
 export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandlers {
   return {
@@ -70,6 +97,13 @@ export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandl
       }
       return connection.setMovement(direction);
     },
+    handleShoot: () => connection.shoot(),
+    handleSetAimAngle: (angle: number) => {
+      if (!isValidAimAngle(angle)) {
+        return Promise.reject(new Error(`Invalid aim angle: ${String(angle)}`));
+      }
+      return connection.setAimAngle(angle);
+    },
   };
 }
 
@@ -81,6 +115,16 @@ export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandl
  */
 function isMovementDirection(value: unknown): value is MovementDirection {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(MOVEMENT_VALUES, value);
+}
+
+/**
+ * Runtime bounds check for the `angle` value received over the
+ * `car:set-aim-angle` IPC channel, per ADR-001's [1, 180] firmware-safe
+ * range. `Number.isInteger` also rejects `NaN`/`Infinity` and non-numbers,
+ * so no separate `typeof` check is needed.
+ */
+function isValidAimAngle(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= MIN_AIM_ANGLE && (value as number) <= MAX_AIM_ANGLE;
 }
 
 /**

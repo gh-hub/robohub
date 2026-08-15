@@ -32,6 +32,26 @@ export const DEVICE_LED = 0x05;
 // .gh-workflows/plans/20260815_065830-car-movement-light-controls/grill/ADR-001.md).
 export const DEVICE_MOTOR = 0x0c;
 
+// Device code for the QD005 water gun's blaster trigger, reverse-engineered
+// from the firmware's runModule() (see ADR-001 at
+// .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
+// The value byte is completely ignored by the firmware — any frame with
+// this device code fires a fixed 200ms pulse regardless of value.
+export const DEVICE_SHOOT = 0x08;
+
+// Device code for the QD005 water gun's aim servo, reverse-engineered from
+// the firmware's runModule() (see ADR-001 at
+// .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
+// The value byte is an absolute angle in degrees, 1-180 inclusive — the
+// firmware maps it to a PWM value via map(angle, 1, 180, 130, 70).
+export const DEVICE_SERVO = 0x02;
+
+// Convention-only placeholder value for shoot commands, per ADR-001: since
+// the firmware ignores payload[9] entirely for device 0x08, this exists
+// purely to give buildCommandFrame() an explicit, self-documenting value
+// rather than a bare 0 at the call site.
+export const SHOOT_VALUE = 0x00;
+
 // One value byte per supported movement direction, per ADR-001's device/value
 // table. The firmware also defines diagonals (0x05-0x08) — intentionally out
 // of scope for this plan, so left undeclared.
