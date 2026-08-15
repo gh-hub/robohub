@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ConnectionState } from "./carConnection.ts";
-import { mapConnectionStatusToUiState } from "./connectionUiState.ts";
+import { mapConnectionStatusToUiState, mapLightControlUiState } from "./connectionUiState.ts";
 
 test("disconnected state maps to an enabled Connect button and disconnected status text", () => {
   const state: ConnectionState = { status: "disconnected", protocol: null, message: null };
@@ -72,4 +72,40 @@ test("error state's button is enabled, not stuck disabled", () => {
   const state: ConnectionState = { status: "error", protocol: null, message: null };
 
   assert.equal(mapConnectionStatusToUiState(state).buttonDisabled, false);
+});
+
+const DISCONNECTED: ConnectionState = { status: "disconnected", protocol: null, message: null };
+const CONNECTING: ConnectionState = { status: "connecting", protocol: null, message: null };
+const CONNECTED_TCP100: ConnectionState = { status: "connected", protocol: "tcp100", message: null };
+const CONNECTED_HTTP80: ConnectionState = { status: "connected", protocol: "http80", message: null };
+const ERROR: ConnectionState = { status: "error", protocol: null, message: null };
+
+for (const [name, state] of [
+  ["disconnected", DISCONNECTED],
+  ["connecting", CONNECTING],
+  ["connected over http80", CONNECTED_HTTP80],
+  ["error", ERROR],
+] as const) {
+  test(`light buttons are disabled when connection is ${name}, regardless of lights-on state`, () => {
+    assert.equal(mapLightControlUiState(state, false).disabled, true);
+    assert.equal(mapLightControlUiState(state, true).disabled, true);
+  });
+}
+
+test("light buttons are enabled when connected over tcp100", () => {
+  assert.equal(mapLightControlUiState(CONNECTED_TCP100, false).disabled, false);
+  assert.equal(mapLightControlUiState(CONNECTED_TCP100, true).disabled, false);
+});
+
+test("light buttons' state label mirrors the lights-on boolean when off", () => {
+  assert.equal(mapLightControlUiState(CONNECTED_TCP100, false).stateLabel, "Off");
+});
+
+test("light buttons' state label mirrors the lights-on boolean when on", () => {
+  assert.equal(mapLightControlUiState(CONNECTED_TCP100, true).stateLabel, "On");
+});
+
+test("light buttons' state label reflects lights-on even while disabled (e.g. disconnected)", () => {
+  assert.equal(mapLightControlUiState(DISCONNECTED, true).stateLabel, "On");
+  assert.equal(mapLightControlUiState(DISCONNECTED, false).stateLabel, "Off");
 });

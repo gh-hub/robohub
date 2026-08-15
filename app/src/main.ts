@@ -3,7 +3,12 @@ import * as path from "node:path";
 
 import { CarConnection } from "./carConnection.ts";
 import { createCarIpcHandlers, forwardConnectionStatus } from "./carIpcHandlers.ts";
-import { CAR_CONNECT_CHANNEL, CAR_DISCONNECT_CHANNEL, CAR_STATUS_CHANNEL } from "./ipcChannels.ts";
+import {
+  CAR_CONNECT_CHANNEL,
+  CAR_DISCONNECT_CHANNEL,
+  CAR_SET_LIGHTS_CHANNEL,
+  CAR_STATUS_CHANNEL,
+} from "./ipcChannels.ts";
 
 // Single, app-lifetime connection instance — per ADR-002, the main process
 // is the sole owner of the car's TCP socket. `new CarConnection()` (no
@@ -15,6 +20,7 @@ const carIpcHandlers = createCarIpcHandlers(carConnection);
 
 ipcMain.handle(CAR_CONNECT_CHANNEL, () => carIpcHandlers.handleConnect());
 ipcMain.handle(CAR_DISCONNECT_CHANNEL, () => carIpcHandlers.handleDisconnect());
+ipcMain.handle(CAR_SET_LIGHTS_CHANNEL, (_event, on: boolean) => carIpcHandlers.handleSetLights(on));
 
 function createWindow(): void {
   const window = new BrowserWindow({

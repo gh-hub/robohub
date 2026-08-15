@@ -9,6 +9,7 @@ import type { ConnectionState } from "./carConnection.ts";
 export interface CarConnectionLike {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
+  setLedState(on: boolean): Promise<void>;
   getState(): ConnectionState;
   on(event: "state-change", listener: (state: ConnectionState) => void): unknown;
   off(event: "state-change", listener: (state: ConnectionState) => void): unknown;
@@ -17,6 +18,7 @@ export interface CarConnectionLike {
 export interface CarIpcHandlers {
   handleConnect: () => Promise<void>;
   handleDisconnect: () => Promise<void>;
+  handleSetLights: (on: boolean) => Promise<void>;
 }
 
 /**
@@ -36,11 +38,18 @@ export interface CarIpcHandlers {
  * `getState()` here would return a stale "connected" snapshot. The
  * status-push channel (`forwardConnectionStatus`) is the single source of
  * truth the renderer should render from, per spec.md.
+ *
+ * `handleSetLights` follows the same resolve-once-initiated contract:
+ * `CarConnection.setLedState()` already rejects synchronously (before any
+ * write) when there's no active tcp100 session, and that rejection is
+ * relayed here rather than swallowed, matching `handleConnect`/
+ * `handleDisconnect`.
  */
 export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandlers {
   return {
     handleConnect: () => connection.connect(),
     handleDisconnect: () => connection.disconnect(),
+    handleSetLights: (on: boolean) => connection.setLedState(on),
   };
 }
 

@@ -66,3 +66,27 @@ export function mapConnectionStatusToUiState(state: ConnectionState): Connection
       };
   }
 }
+
+export interface LightControlUiState {
+  disabled: boolean;
+  stateLabel: "On" | "Off";
+}
+
+/**
+ * Pure `ConnectionState` + local lights-on boolean -> light-button UI state
+ * mapping, per spec.md's "renderer status-to-UI mapping" testing decision.
+ * Both "Left Light" and "Right Light" buttons render from this same result
+ * (mirrored — the protocol has one shared LED command, so there is no
+ * independent left/right state to diverge). Enabled only for an active
+ * tcp100 session; disabled in every other case (disconnected, connecting,
+ * error, or connected over the http80 fallback, which has no LED support).
+ */
+export function mapLightControlUiState(
+  connection: ConnectionState,
+  lightsOn: boolean,
+): LightControlUiState {
+  return {
+    disabled: connection.status !== "connected" || connection.protocol !== "tcp100",
+    stateLabel: lightsOn ? "On" : "Off",
+  };
+}

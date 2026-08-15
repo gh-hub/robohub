@@ -10,6 +10,7 @@ import {
   CAR_SSID,
   CAR_TCP_PORT,
 } from "./carConfig.ts";
+import { buildCommandFrame, CMD_RUN, DEVICE_LED } from "./commandFrame.ts";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -146,6 +147,44 @@ export class CarConnection extends EventEmitter {
     }
 
     this.setState({ ...DISCONNECTED_STATE });
+  }
+
+  /**
+   * Sends an already-built binary command frame (see commandFrame.ts /
+   * ADR-001) over the currently-open TCP socket. Commands only make sense
+   * on a live tcp100 session — http80 has no command channel at all, and a
+   * disconnected/connecting/error session has no socket to write to — so
+   * every other state rejects synchronously before any write is attempted.
+   */
+  async sendCommandFrame(frame: Buffer): Promise<void> {
+    if (this.state.status !== "connected" || this.state.protocol !== "tcp100" || !this.socket) {
+      throw new Error(
+        `sendCommandFrame() called while status is "${this.state.status}" and protocol is "${this.state.protocol}"`,
+      );
+    }
+
+    const socket = this.socket;
+    await new Promise<void>((resolve, reject) => {
+      socket.write(frame, (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * Convenience wrapper over `sendCommandFrame()` for the one command this
+   * plan wires end-to-end: the car's single shared LED on/off command (see
+   * spec.md — the protocol has no independent left/right addressing, so
+   * both light buttons funnel through this one call).
+   */
+  async setLedState(on: boolean): Promise<void> {
+    await this.sendCommandFrame(
+      buildCommandFrame({ action: CMD_RUN, device: DEVICE_LED, value: on ? 1 : 0 }),
+    );
   }
 
   /**

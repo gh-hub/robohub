@@ -353,6 +353,95 @@ test("disconnect() on an http80 session stops the liveness poll (no leaked timer
   );
 });
 
+// The client-side write() callback (awaited inside setLedState()) only
+// confirms the bytes were handed to the OS socket buffer, not that the mock
+// server has actually received them yet — so both tests below assert
+// against a promise that resolves on the server socket's own "data" event.
+// The server-side socket is captured via startMockTcpServer's onConnection
+// callback (not read back afterward from the shared `tcpServerSockets` set)
+// and its readiness is awaited alongside connect() itself, so there's no
+// race between the client's "connect" event and the server's "connection"
+// event under load.
+function captureServerSocket(): {
+  ready: Promise<net.Socket>;
+  onConnection: (socket: net.Socket) => void;
+} {
+  let resolveReady!: (socket: net.Socket) => void;
+  const ready = new Promise<net.Socket>((resolve) => {
+    resolveReady = resolve;
+  });
+  return { ready, onConnection: (socket) => resolveReady(socket) };
+}
+
+test("setLedState(true) writes the exact ADR-001 LED-on frame to the TCP socket", async () => {
+  const { ready, onConnection } = captureServerSocket();
+  const tcpPort = await startMockTcpServer(onConnection);
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort,
+    httpPort: CLOSED_HTTP_PORT,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+
+  const [serverSocket] = await Promise.all([ready, connection.connect()]);
+  const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
+  await connection.setLedState(true);
+
+  assert.deepEqual(
+    [...(await receivedData)],
+    [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x00, 0x01],
+  );
+});
+
+test("setLedState(false) writes the exact ADR-001 LED-off frame to the TCP socket", async () => {
+  const { ready, onConnection } = captureServerSocket();
+  const tcpPort = await startMockTcpServer(onConnection);
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort,
+    httpPort: CLOSED_HTTP_PORT,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+
+  const [serverSocket] = await Promise.all([ready, connection.connect()]);
+  const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
+  await connection.setLedState(false);
+
+  assert.deepEqual(
+    [...(await receivedData)],
+    [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x05, 0x00, 0x00],
+  );
+});
+
+test("setLedState() rejects without writing to the socket when disconnected", async () => {
+  const connection = new CarConnection({ timeoutMs: TEST_TIMEOUT_MS });
+
+  await assert.rejects(() => connection.setLedState(true), /status is "disconnected"/);
+});
+
+test("setLedState() rejects without writing to the socket on an http80 session", async () => {
+  let requestCount = 0;
+  const httpPort = await startMockHttpServer(() => {
+    requestCount += 1;
+  });
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort: CLOSED_TCP_PORT,
+    httpPort,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+  await connection.connect();
+  assert.equal(connection.getState().protocol, "http80");
+
+  await assert.rejects(() => connection.setLedState(true), /protocol is "http80"/);
+
+  // Only the initial probe GET should have hit the mock server — no
+  // additional request/write was attempted by the rejected setLedState() call.
+  assert.equal(requestCount, 1);
+
+  await connection.disconnect();
+});
+
 test("an abrupt remote close (socket error) while connected is detected as error", async () => {
   const tcpPort = await startMockTcpServer((socket) => {
     // resetAndDestroy() sends an actual RST packet, which is what makes the

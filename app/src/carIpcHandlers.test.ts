@@ -31,20 +31,24 @@ const DISCONNECTED_STATE: ConnectionState = {
 class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   connectCallCount = 0;
   disconnectCallCount = 0;
+  setLedStateCalls: boolean[] = [];
 
   private state: ConnectionState;
   private readonly connectImpl: () => Promise<void>;
   private readonly disconnectImpl: () => Promise<void>;
+  private readonly setLedStateImpl: (on: boolean) => Promise<void>;
 
   constructor(options: {
     initialState?: ConnectionState;
     onConnect?: () => Promise<void>;
     onDisconnect?: () => Promise<void>;
+    onSetLedState?: (on: boolean) => Promise<void>;
   } = {}) {
     super();
     this.state = options.initialState ?? { ...DISCONNECTED_STATE };
     this.connectImpl = options.onConnect ?? (async () => this.setState(CONNECTED_STATE));
     this.disconnectImpl = options.onDisconnect ?? (async () => this.setState(DISCONNECTED_STATE));
+    this.setLedStateImpl = options.onSetLedState ?? (async () => {});
   }
 
   getState(): ConnectionState {
@@ -59,6 +63,11 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   async disconnect(): Promise<void> {
     this.disconnectCallCount += 1;
     await this.disconnectImpl();
+  }
+
+  async setLedState(on: boolean): Promise<void> {
+    this.setLedStateCalls.push(on);
+    await this.setLedStateImpl(on);
   }
 
   setState(next: ConnectionState): void {
@@ -105,6 +114,35 @@ test("handleDisconnect rejects when connection.disconnect() rejects", async () =
   const handlers = createCarIpcHandlers(connection);
 
   await assert.rejects(() => handlers.handleDisconnect(), /disconnected/);
+});
+
+test("handleSetLights calls connection.setLedState(true) when turning lights on", async () => {
+  const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+  const handlers = createCarIpcHandlers(connection);
+
+  await handlers.handleSetLights(true);
+
+  assert.deepEqual(connection.setLedStateCalls, [true]);
+});
+
+test("handleSetLights calls connection.setLedState(false) when turning lights off", async () => {
+  const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
+  const handlers = createCarIpcHandlers(connection);
+
+  await handlers.handleSetLights(false);
+
+  assert.deepEqual(connection.setLedStateCalls, [false]);
+});
+
+test("handleSetLights rejects when connection.setLedState() rejects", async () => {
+  const connection = new FakeCarConnection({
+    onSetLedState: async () => {
+      throw new Error('sendCommandFrame() called while status is "disconnected" and protocol is "null"');
+    },
+  });
+  const handlers = createCarIpcHandlers(connection);
+
+  await assert.rejects(() => handlers.handleSetLights(true), /sendCommandFrame/);
 });
 
 test("forwardConnectionStatus forwards every state-change event", () => {

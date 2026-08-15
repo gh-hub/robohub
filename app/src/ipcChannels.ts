@@ -6,3 +6,4 @@
 export const CAR_CONNECT_CHANNEL = "car:connect";
 export const CAR_DISCONNECT_CHANNEL = "car:disconnect";
 export const CAR_STATUS_CHANNEL = "car:status";
+export const CAR_SET_LIGHTS_CHANNEL = "car:set-lights";

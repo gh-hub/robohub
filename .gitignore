@@ -1,0 +1,51 @@
+# ---- Node.js ----
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+.parcel-cache/
+coverage/
+.env
+.env.local
+.env.*.local
+*.tsbuildinfo
+.eslintcache
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+dist/
+build/
+*.egg
+pip-wheel-metadata/
+
+# ---- QD001 hardware probing ----
+tools/qd001-probe/dumps/
+
+# ---- Editors / OS ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
