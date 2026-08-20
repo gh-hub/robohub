@@ -8,6 +8,7 @@ import type { MovementDirection } from "./commandFrame.ts";
 import {
   createCarIpcHandlers,
   forwardConnectionStatus,
+  forwardWifiLogLines,
   type CarConnectionLike,
 } from "./carIpcHandlers.ts";
 
@@ -347,6 +348,37 @@ test("forwardConnectionStatus's unsubscribe stops further forwarding", () => {
   unsubscribe();
 
   connection.setState(CONNECTED_STATE);
+
+  assert.deepEqual(received, []);
+});
+
+test('forwardWifiLogLines forwards every "log-lines" batch as a single call', () => {
+  const connection = new FakeCarConnection();
+  const received: string[][] = [];
+
+  forwardWifiLogLines(connection, (lines) => {
+    received.push(lines);
+  });
+
+  connection.emit("log-lines", ["[00:00:00.000] first", "[00:00:00.001] second"]);
+  connection.emit("log-lines", ["[00:00:00.002] third"]);
+
+  assert.deepEqual(received, [
+    ["[00:00:00.000] first", "[00:00:00.001] second"],
+    ["[00:00:00.002] third"],
+  ]);
+});
+
+test("forwardWifiLogLines's unsubscribe stops further forwarding", () => {
+  const connection = new FakeCarConnection();
+  const received: string[][] = [];
+
+  const unsubscribe = forwardWifiLogLines(connection, (lines) => {
+    received.push(lines);
+  });
+  unsubscribe();
+
+  connection.emit("log-lines", ["[00:00:00.000] should not arrive"]);
 
   assert.deepEqual(received, []);
 });

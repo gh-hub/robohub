@@ -19,8 +19,11 @@ import {
   mapMovementControlUiState,
   mapPanControlUiState,
   mapShootControlUiState,
+  mapUsbLogControlUiState,
   type ConnectionState,
+  type UsbLogState,
 } from "./connectionUiState.ts";
+import { appendLogLines, clearLogLines, renderLogPanel } from "./logPanel.ts";
 
 // Redeclared locally rather than imported from commandFrame.ts — that file
 // is part of the CommonJS main-process build (tsconfig.build.json); pulling
@@ -39,6 +42,11 @@ interface CarApi {
   shoot: () => Promise<void>;
   setPanAngle: (angle: number) => Promise<void>;
   onUsbStatus: (callback: (connected: boolean) => void) => () => void;
+  onWifiLogLines: (callback: (lines: string[]) => void) => () => void;
+  usbLogConnect: () => Promise<void>;
+  usbLogDisconnect: () => Promise<void>;
+  onUsbLogStatus: (callback: (state: UsbLogState) => void) => () => void;
+  onUsbLogLines: (callback: (lines: string[]) => void) => () => void;
 }
 
 declare global {
@@ -138,6 +146,27 @@ let panHoldDirection: PanDirection | null = null;
 // held; null when nothing is held.
 let panRepeatTimer: ReturnType<typeof setInterval> | null = null;
 
+// Each log panel's currently-displayed lines. Per spec.md, neither panel
+// auto-clears on connect/disconnect/reconnect — only an explicit Clear click
+// (or app restart) empties these — so nothing here is reset by the
+// onStatus/onUsbStatus handlers below, unlike lightsOn/panAngle. wifiLogLines
+// is fed live by onWifiLogLines below; usbLogLines is fed live by
+// onUsbLogLines below.
+let wifiLogLines: string[] = [];
+let usbLogLines: string[] = [];
+
+// State for the USB Log panel's own Connect/Disconnect toggle button, per
+// spec.md's "reuses the app's existing single-button toggle pattern"
+// decision. Mirrors `currentState` above exactly: `UsbSerialConnection` now
+// has the same always-resolves `connect()`/`disconnect()` contract as
+// `CarConnection`, with real success/failure (connected, or an error such as
+// "no CH340 adapter found") arriving via the `onUsbLogStatus` push below —
+// per review round-1 fix ticket 02, replacing the app-tracked boolean this
+// used to be (which had no way to show the operator *why* a Connect attempt
+// failed). No initial-state query exists, so a fresh `UsbSerialConnection`
+// starts `disconnected`, matching `currentState`'s same default.
+let usbLogState: UsbLogState = { status: "disconnected", message: null };
+
 function render(state: ConnectionState): void {
   const button = document.getElementById("toggle-button") as HTMLButtonElement;
   const statusText = document.getElementById("status-text") as HTMLElement;
@@ -189,6 +218,66 @@ function renderUsbStatus(connected: boolean): void {
   const usbStatusText = document.getElementById("usb-status-text") as HTMLElement;
   usbStatusText.textContent = connected ? "USB: Connected" : "USB: Not connected";
   usbStatusText.className = connected ? "usb-status-connected" : "usb-status-disconnected";
+}
+
+// Thin DOM-wiring for the two log panels, per spec.md's "one small,
+// reusable piece of log-panel logic shared by both panels" decision —
+// each just points renderLogPanel() at its own DOM element and its own
+// locally-tracked lines array.
+function renderWifiLog(): void {
+  const panel = document.getElementById("wifi-log-panel") as HTMLElement;
+  renderLogPanel(panel, wifiLogLines);
+}
+
+function renderUsbLog(): void {
+  const panel = document.getElementById("usb-log-panel") as HTMLElement;
+  renderLogPanel(panel, usbLogLines);
+}
+
+function handleWifiLogClear(): void {
+  wifiLogLines = clearLogLines();
+  renderWifiLog();
+}
+
+function handleUsbLogClear(): void {
+  usbLogLines = clearLogLines();
+  renderUsbLog();
+}
+
+// Single toggle button + status text driven by `usbLogState`, mirroring the
+// main Wi-Fi toggle-button's `render()` shape (see spec.md's "reuses the
+// app's existing single-button toggle pattern" decision), independent of
+// `currentState`/`render(state)` — the USB serial port has no relationship
+// to the Wi-Fi connection lifecycle. `mapUsbLogControlUiState` is the same
+// kind of pure status-to-UI mapper `mapConnectionStatusToUiState` is for the
+// Wi-Fi button, so a failed Connect attempt (no CH340 detected, a port-open
+// error) now has a visible statusText, not just a console.error.
+function renderUsbLogControls(): void {
+  const button = document.getElementById("usb-log-toggle-button") as HTMLButtonElement;
+  const statusText = document.getElementById("usb-log-status-text") as HTMLElement;
+  const uiState = mapUsbLogControlUiState(usbLogState);
+
+  button.textContent = uiState.buttonLabel;
+  button.disabled = uiState.buttonDisabled;
+  statusText.textContent = uiState.statusText;
+  statusText.className = uiState.statusClass;
+}
+
+function handleUsbLogToggleClick(): void {
+  const action =
+    usbLogState.status === "connected" || usbLogState.status === "connecting"
+      ? window.carAPI.usbLogDisconnect()
+      : window.carAPI.usbLogConnect();
+
+  // Mirrors handleToggleClick(): rejects synchronously only for an invalid
+  // current state (e.g. a stray double-click racing a status push already
+  // in flight) — the real success/failure signal for the button/status text
+  // is the onUsbLogStatus push below, not this promise's resolution, per
+  // usbSerialConnection.ts's now-aligned contract with
+  // CarConnection.connect().
+  action.catch((error: unknown) => {
+    console.error("USB Log connect/disconnect failed:", error);
+  });
 }
 
 function renderShoot(state: ConnectionState): void {
@@ -458,8 +547,14 @@ function handlePanSpeedChange(event: Event): void {
 }
 
 render(currentState);
+renderWifiLog();
+renderUsbLog();
+renderUsbLogControls();
 
 document.getElementById("toggle-button")!.addEventListener("click", handleToggleClick);
+document.getElementById("wifi-log-clear-button")!.addEventListener("click", handleWifiLogClear);
+document.getElementById("usb-log-clear-button")!.addEventListener("click", handleUsbLogClear);
+document.getElementById("usb-log-toggle-button")!.addEventListener("click", handleUsbLogToggleClick);
 document.getElementById("light-button")!.addEventListener("click", handleLightToggleClick);
 document.getElementById("shoot-button")!.addEventListener("click", handleShootClick);
 document
@@ -545,4 +640,40 @@ window.carAPI.onStatus((state) => {
 // process, per ADR-002/this ticket's acceptance criteria.
 window.carAPI.onUsbStatus((connected) => {
   renderUsbStatus(connected);
+});
+
+// USB Log panel's Connect/Disconnect status, mirroring window.carAPI.onStatus
+// above exactly: the module has no local polling of its own — it only ever
+// reflects whatever the last "car:usb-log-status" push carried (connected,
+// or an error such as "no CH340 adapter found"/a port-open failure), per
+// review round-1 fix ticket 02. This also means a mid-stream unplug now
+// self-corrects the button/status text on its own, since UsbSerialConnection
+// already emits "state-change" for that case — no more waiting for the
+// user's next click.
+window.carAPI.onUsbLogStatus((state) => {
+  usbLogState = state;
+  renderUsbLogControls();
+});
+
+// Wi-Fi Log panel: appends each pushed batch of lines (already timestamped
+// by LogLineBuffer on the main-process side) via the shared append-with-cap
+// helper in a single call, then re-renders once per batch — not once per
+// line — per review-round-2 fix ticket 01 (car-log-viewer plan): a chunk
+// that produced many lines still means exactly one DOM update here. No
+// separate control needed — this only ever fires while a tcp100 session is
+// live (see carConnection.ts's class doc comment), so it naturally goes
+// quiet on disconnect or an http80 session without this handler needing to
+// gate on `currentState` itself.
+window.carAPI.onWifiLogLines((lines) => {
+  wifiLogLines = appendLogLines(wifiLogLines, lines);
+  renderWifiLog();
+});
+
+// USB Log panel: same append-with-cap/re-render-per-batch shape as
+// onWifiLogLines above. Only ever fires while the USB serial port is open
+// (see `UsbSerialConnection`'s class doc comment) — no separate gating
+// needed here either.
+window.carAPI.onUsbLogLines((lines) => {
+  usbLogLines = appendLogLines(usbLogLines, lines);
+  renderUsbLog();
 });

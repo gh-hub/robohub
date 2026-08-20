@@ -194,6 +194,73 @@
       .usb-status-connected {
         color: #1a7f37;
       }
+
+      #log-panels {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .log-panel-container {
+        flex: 1 1 20rem;
+        min-width: 20rem;
+      }
+
+      .log-panel-container h2 {
+        font-size: 1rem;
+        margin: 0 0 0.35rem 0;
+      }
+
+      .log-panel {
+        height: 10rem;
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 0.5rem;
+        margin: 0 0 0.35rem 0;
+        background: #fafafa;
+        font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .log-panel-clear-button {
+        font-size: 0.9rem;
+        padding: 0.3rem 0.9rem;
+        cursor: pointer;
+      }
+
+      #usb-log-toggle-button {
+        font-size: 0.9rem;
+        padding: 0.3rem 0.9rem;
+        margin-right: 0.5rem;
+        cursor: pointer;
+      }
+
+      #usb-log-status-text {
+        display: inline-block;
+        margin-right: 0.5rem;
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+
+      .usb-log-status-disconnected {
+        color: #666666;
+      }
+
+      .usb-log-status-connecting {
+        color: #b8860b;
+      }
+
+      .usb-log-status-connected {
+        color: #1a7f37;
+      }
+
+      .usb-log-status-error {
+        color: #cf222e;
+      }
     </style>
   </head>
   <body>
@@ -237,6 +304,20 @@
         <input type="checkbox" id="shoot-cooldown-toggle" checked />
         Cooldown
       </label>
+    </div>
+    <div id="log-panels">
+      <div class="log-panel-container">
+        <h2>Wi-Fi Log</h2>
+        <div id="wifi-log-panel" class="log-panel" aria-live="polite"></div>
+        <button id="wifi-log-clear-button" class="log-panel-clear-button" type="button">Clear</button>
+      </div>
+      <div class="log-panel-container">
+        <h2>USB Log</h2>
+        <div id="usb-log-panel" class="log-panel" aria-live="polite"></div>
+        <button id="usb-log-toggle-button" type="button">Connect</button>
+        <span id="usb-log-status-text" class="usb-log-status-disconnected">Not connected</span>
+        <button id="usb-log-clear-button" class="log-panel-clear-button" type="button">Clear</button>
+      </div>
     </div>
     <script type="module" src="../dist/renderer.js"></script>
   </body>

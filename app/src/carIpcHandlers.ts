@@ -16,7 +16,9 @@ export interface CarConnectionLike {
   setPanAngle(angle: number): Promise<void>;
   getState(): ConnectionState;
   on(event: "state-change", listener: (state: ConnectionState) => void): unknown;
+  on(event: "log-lines", listener: (lines: string[]) => void): unknown;
   off(event: "state-change", listener: (state: ConnectionState) => void): unknown;
+  off(event: "log-lines", listener: (lines: string[]) => void): unknown;
 }
 
 export interface CarIpcHandlers {
@@ -146,5 +148,34 @@ export function forwardConnectionStatus(
 
   return () => {
     connection.off("state-change", onStateChange);
+  };
+}
+
+/**
+ * Subscribes `sendLines` to every future "log-lines" event on `connection`
+ * (see `CarConnection`'s class doc comment — emitted only for a tcp100
+ * session's socket data, never for http80). Returns an unsubscribe
+ * function. Mirrors `forwardConnectionStatus()`'s exact shape: an adapter
+ * wires `sendLines` to `webContents.send(CAR_WIFI_LOG_LINE_CHANNEL, lines)`,
+ * kept as a plain function here so the forwarding logic itself is testable
+ * without a real `WebContents`.
+ *
+ * Forwards the array from a single "log-lines" event as a single IPC send —
+ * never splits it back into one send per line — so a chunk that produced
+ * many lines still reaches the renderer as one message (review-round-2 fix
+ * ticket 01, car-log-viewer plan).
+ */
+export function forwardWifiLogLines(
+  connection: CarConnectionLike,
+  sendLines: (lines: string[]) => void,
+): () => void {
+  const onLogLines = (lines: string[]): void => {
+    sendLines(lines);
+  };
+
+  connection.on("log-lines", onLogLines);
+
+  return () => {
+    connection.off("log-lines", onLogLines);
   };
 }

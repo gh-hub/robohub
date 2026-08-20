@@ -8,6 +8,8 @@ import {
   mapMovementControlUiState,
   mapPanControlUiState,
   mapShootControlUiState,
+  mapUsbLogControlUiState,
+  type UsbLogState,
 } from "./connectionUiState.ts";
 
 test("disconnected state maps to an enabled Connect button and disconnected status text", () => {
@@ -184,4 +186,66 @@ test("pan Left button stays enabled at the 1 lower bound", () => {
 test("pan Left/Right buttons are both disabled at the bounds when also disconnected", () => {
   assert.equal(mapPanControlUiState(DISCONNECTED, 180).leftDisabled, true);
   assert.equal(mapPanControlUiState(DISCONNECTED, 1).rightDisabled, true);
+});
+
+test("USB Log disconnected state maps to an enabled Connect button and 'Not connected' status text", () => {
+  const state: UsbLogState = { status: "disconnected", message: null };
+
+  assert.deepEqual(mapUsbLogControlUiState(state), {
+    buttonLabel: "Connect",
+    buttonDisabled: false,
+    statusText: "Not connected",
+    statusClass: "usb-log-status-disconnected",
+  });
+});
+
+test("USB Log connecting state maps to a disabled Connecting button", () => {
+  const state: UsbLogState = { status: "connecting", message: null };
+
+  assert.deepEqual(mapUsbLogControlUiState(state), {
+    buttonLabel: "Connecting…",
+    buttonDisabled: true,
+    statusText: "Connecting…",
+    statusClass: "usb-log-status-connecting",
+  });
+});
+
+test("USB Log connected state maps to an enabled Disconnect button and shows the connection message", () => {
+  const state: UsbLogState = { status: "connected", message: "Connected to COM7 at 115200 baud" };
+
+  assert.deepEqual(mapUsbLogControlUiState(state), {
+    buttonLabel: "Disconnect",
+    buttonDisabled: false,
+    statusText: "Connected to COM7 at 115200 baud",
+    statusClass: "usb-log-status-connected",
+  });
+});
+
+test("USB Log connected state with no message falls back to a generic Connected status text", () => {
+  const state: UsbLogState = { status: "connected", message: null };
+
+  assert.equal(mapUsbLogControlUiState(state).statusText, "Connected");
+});
+
+test("USB Log error state maps to a re-enabled Connect button and shows the error message — the operator-facing surfacing this fix adds", () => {
+  const state: UsbLogState = { status: "error", message: "No CH340 serial adapter detected." };
+
+  assert.deepEqual(mapUsbLogControlUiState(state), {
+    buttonLabel: "Connect",
+    buttonDisabled: false,
+    statusText: "No CH340 serial adapter detected.",
+    statusClass: "usb-log-status-error",
+  });
+});
+
+test("USB Log error state with no message falls back to a generic error status text", () => {
+  const state: UsbLogState = { status: "error", message: null };
+
+  assert.equal(mapUsbLogControlUiState(state).statusText, "USB Log connection error");
+});
+
+test("USB Log error state's button is enabled, not stuck disabled", () => {
+  const state: UsbLogState = { status: "error", message: null };
+
+  assert.equal(mapUsbLogControlUiState(state).buttonDisabled, false);
 });

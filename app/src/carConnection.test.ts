@@ -615,6 +615,122 @@ test("setPanAngle() rejects without writing to the socket on an http80 session",
   await connection.disconnect();
 });
 
+test('a tcp100 session emits one "log-lines" batch carrying every line from a chunk', async () => {
+  const { ready, onConnection } = captureServerSocket();
+  const tcpPort = await startMockTcpServer(onConnection);
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort,
+    httpPort: CLOSED_HTTP_PORT,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+
+  const receivedBatches: string[][] = [];
+  connection.on("log-lines", (lines: string[]) => receivedBatches.push(lines));
+
+  const [serverSocket] = await Promise.all([ready, connection.connect()]);
+
+  const gotBatch = new Promise<void>((resolve) => {
+    connection.on("log-lines", function onLogLines() {
+      connection.off("log-lines", onLogLines);
+      resolve();
+    });
+  });
+  serverSocket.write("first line\nsecond line\n");
+  await gotBatch;
+
+  assert.equal(receivedBatches.length, 1, "both lines arrive in a single event, not one per line");
+  assert.equal(receivedBatches[0].length, 2);
+  assert.match(receivedBatches[0][0], /^\[\d{2}:\d{2}:\d{2}\.\d{3}\] first line$/);
+  assert.match(receivedBatches[0][1], /^\[\d{2}:\d{2}:\d{2}\.\d{3}\] second line$/);
+});
+
+test('a tcp100 session discards a trailing partial line from "log-lines" (no guaranteed frame boundary)', async () => {
+  const { ready, onConnection } = captureServerSocket();
+  const tcpPort = await startMockTcpServer(onConnection);
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort,
+    httpPort: CLOSED_HTTP_PORT,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+
+  const receivedLines: string[] = [];
+  connection.on("log-lines", (lines: string[]) => receivedLines.push(...lines));
+
+  const [serverSocket] = await Promise.all([ready, connection.connect()]);
+
+  const gotBatch = new Promise<void>((resolve) => {
+    connection.on("log-lines", function onLogLines() {
+      connection.off("log-lines", onLogLines);
+      resolve();
+    });
+  });
+  serverSocket.write("complete\npartial-no-newline");
+  await gotBatch;
+
+  assert.equal(receivedLines.length, 1);
+  assert.match(receivedLines[0], /complete$/);
+});
+
+test('an http80 session never emits "log-lines" (no persistent socket to listen on)', async () => {
+  const httpPort = await startMockHttpServer();
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort: CLOSED_TCP_PORT,
+    httpPort,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+
+  const receivedBatches: string[][] = [];
+  connection.on("log-lines", (lines: string[]) => receivedBatches.push(lines));
+
+  await connection.connect();
+  assert.equal(connection.getState().protocol, "http80");
+
+  // No socket exists to write to on this path; simply confirm nothing has
+  // fired by the time the session is settled and briefly afterward.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(receivedBatches, []);
+
+  await connection.disconnect();
+});
+
+// Per review-round-2 fix ticket 01 (car-log-viewer plan): a chunk consisting
+// mostly of newline bytes can make a single LogLineBuffer.push() call return
+// tens of thousands of lines. This proves that scenario still results in
+// exactly one "log-lines" event carrying the entire array, not one event per
+// line — the fix for the resource-exhaustion DoS the round-2 review flagged
+// (tens of thousands of synchronous IPC sends/DOM reflows from one burst).
+test('a chunk producing thousands of lines still emits exactly one "log-lines" event carrying all of them', async () => {
+  const { ready, onConnection } = captureServerSocket();
+  const tcpPort = await startMockTcpServer(onConnection);
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort,
+    httpPort: CLOSED_HTTP_PORT,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+
+  const receivedBatches: string[][] = [];
+  connection.on("log-lines", (lines: string[]) => receivedBatches.push(lines));
+
+  const [serverSocket] = await Promise.all([ready, connection.connect()]);
+
+  const LINE_COUNT = 20000;
+  const gotBatch = new Promise<void>((resolve) => {
+    connection.on("log-lines", function onLogLines() {
+      connection.off("log-lines", onLogLines);
+      resolve();
+    });
+  });
+  serverSocket.write("\n".repeat(LINE_COUNT));
+  await gotBatch;
+
+  assert.equal(receivedBatches.length, 1, "one chunk must yield exactly one event, not one per line");
+  assert.equal(receivedBatches[0].length, LINE_COUNT);
+});
+
 test("an abrupt remote close (socket error) while connected is detected as error", async () => {
   const tcpPort = await startMockTcpServer((socket) => {
     // resetAndDestroy() sends an actual RST packet, which is what makes the

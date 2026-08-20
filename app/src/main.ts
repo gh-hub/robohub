@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import * as path from "node:path";
 
 import { CarConnection } from "./carConnection.ts";
-import { createCarIpcHandlers, forwardConnectionStatus } from "./carIpcHandlers.ts";
+import { createCarIpcHandlers, forwardConnectionStatus, forwardWifiLogLines } from "./carIpcHandlers.ts";
 import type { MovementDirection } from "./commandFrame.ts";
 import {
   CAR_CONNECT_CHANNEL,
@@ -12,8 +12,15 @@ import {
   CAR_SET_PAN_ANGLE_CHANNEL,
   CAR_SHOOT_CHANNEL,
   CAR_STATUS_CHANNEL,
+  CAR_USB_LOG_CONNECT_CHANNEL,
+  CAR_USB_LOG_DISCONNECT_CHANNEL,
+  CAR_USB_LOG_LINE_CHANNEL,
+  CAR_USB_LOG_STATUS_CHANNEL,
   CAR_USB_STATUS_CHANNEL,
+  CAR_WIFI_LOG_LINE_CHANNEL,
 } from "./ipcChannels.ts";
+import { createUsbLogIpcHandlers, forwardUsbLogLines, forwardUsbLogStatus } from "./usbLogIpcHandlers.ts";
+import { UsbSerialConnection } from "./usbSerialConnection.ts";
 import { isUsbSerialDevicePresent, startUsbStatusPolling } from "./usbStatus.ts";
 
 // Single, app-lifetime connection instance — per ADR-002, the main process
@@ -34,6 +41,36 @@ ipcMain.handle(CAR_SHOOT_CHANNEL, () => carIpcHandlers.handleShoot());
 ipcMain.handle(CAR_SET_PAN_ANGLE_CHANNEL, (_event, angle: number) =>
   carIpcHandlers.handleSetPanAngle(angle),
 );
+
+// Single, app-lifetime USB-serial connection instance for the USB Log panel
+// — separate from carConnection above (a different physical transport, no
+// shared lifecycle), per usbSerialConnection.ts's class doc comment.
+// `new UsbSerialConnection()` (no options) opens a real `serialport`-backed
+// port auto-detected via the real `SerialPort.list()`, as opposed to the
+// fakes usbSerialConnection.test.ts injects.
+const usbSerialConnection = new UsbSerialConnection();
+const usbLogIpcHandlers = createUsbLogIpcHandlers(usbSerialConnection);
+
+ipcMain.handle(CAR_USB_LOG_CONNECT_CHANNEL, () => usbLogIpcHandlers.handleUsbLogConnect());
+ipcMain.handle(CAR_USB_LOG_DISCONNECT_CHANNEL, () => usbLogIpcHandlers.handleUsbLogDisconnect());
+
+// Closing the app must not leave the USB serial port locked for other tools
+// (Arduino IDE, esptool.py, etc.) — per spec.md's Connect/Disconnect
+// rationale. Only meaningful while actually connected: `disconnect()`
+// rejects synchronously otherwise, and there's nothing to await here since
+// the process is exiting regardless of whether the close completes in time.
+// Checking only for "connected" (not also "error") is deliberate, not a
+// gap: per `UsbSerialConnection`'s own port-field invariant (see its class
+// body), every non-"connected" status — "error" included — is only ever
+// reached with `this.port` already cleared, since the port's own "error"
+// listener now closes the port and nulls the reference itself. So there is
+// no reachable "error"-with-a-live-handle state left for this handler to
+// account for.
+app.on("before-quit", () => {
+  if (usbSerialConnection.getState().status === "connected") {
+    void usbSerialConnection.disconnect();
+  }
+});
 
 function createWindow(): void {
   const window = new BrowserWindow({
@@ -66,9 +103,38 @@ function createWindow(): void {
     window.webContents.send(CAR_USB_STATUS_CHANNEL, connected);
   });
 
+  // Wi-Fi Log panel, per spec.md: forwards every "log-lines" event
+  // carConnection emits (tcp100 sessions only) to this window's renderer —
+  // one IPC send per emitted batch, not per line (see forwardWifiLogLines's
+  // doc comment). Same unsubscribe-on-close discipline as stopForwardingStatus.
+  const stopForwardingWifiLogLines = forwardWifiLogLines(carConnection, (lines) => {
+    window.webContents.send(CAR_WIFI_LOG_LINE_CHANNEL, lines);
+  });
+
+  // USB Log panel, per spec.md: forwards every "log-lines" event
+  // usbSerialConnection emits (only while a port is actually open) to this
+  // window's renderer — one IPC send per emitted batch, not per line. Same
+  // unsubscribe-on-close discipline as the other forwarders above.
+  const stopForwardingUsbLogLines = forwardUsbLogLines(usbSerialConnection, (lines) => {
+    window.webContents.send(CAR_USB_LOG_LINE_CHANNEL, lines);
+  });
+
+  // USB Log Connect/Disconnect status push, mirroring stopForwardingStatus
+  // above: forwards every "state-change" usbSerialConnection emits (connect
+  // success/failure, a clean disconnect, or an unplug-triggered drop) so the
+  // renderer's USB Log toggle button/status text has a real signal to render
+  // from, per review round-1 fix ticket 02. Same unsubscribe-on-close
+  // discipline as the other forwarders above.
+  const stopForwardingUsbLogStatus = forwardUsbLogStatus(usbSerialConnection, (state) => {
+    window.webContents.send(CAR_USB_LOG_STATUS_CHANNEL, state);
+  });
+
   window.on("closed", () => {
     stopForwardingStatus();
     stopUsbStatusPolling();
+    stopForwardingWifiLogLines();
+    stopForwardingUsbLogLines();
+    stopForwardingUsbLogStatus();
   });
 
   window.loadFile(path.join(__dirname, "..", "public", "index.html"));
