@@ -14,13 +14,16 @@
 // re-declared to match preload.ts's `CarApi` exactly; if that contract
 // ever changes, this must be updated by hand.
 import {
-  mapAimControlUiState,
   mapConnectionStatusToUiState,
   mapLightControlUiState,
   mapMovementControlUiState,
+  mapPanControlUiState,
   mapShootControlUiState,
+  mapUsbLogControlUiState,
   type ConnectionState,
+  type UsbLogState,
 } from "./connectionUiState.ts";
+import { appendLogLines, clearLogLines, renderLogPanel } from "./logPanel.ts";
 
 // Redeclared locally rather than imported from commandFrame.ts — that file
 // is part of the CommonJS main-process build (tsconfig.build.json); pulling
@@ -37,8 +40,13 @@ interface CarApi {
   setLights: (on: boolean) => Promise<void>;
   setMovement: (direction: MovementDirection) => Promise<void>;
   shoot: () => Promise<void>;
-  setAimAngle: (angle: number) => Promise<void>;
+  setPanAngle: (angle: number) => Promise<void>;
   onUsbStatus: (callback: (connected: boolean) => void) => () => void;
+  onWifiLogLines: (callback: (lines: string[]) => void) => () => void;
+  usbLogConnect: () => Promise<void>;
+  usbLogDisconnect: () => Promise<void>;
+  onUsbLogStatus: (callback: (state: UsbLogState) => void) => () => void;
+  onUsbLogLines: (callback: (lines: string[]) => void) => () => void;
 }
 
 declare global {
@@ -74,6 +82,21 @@ const MOVEMENT_BUTTON_IDS: Record<Exclude<MovementDirection, "stop">, string> = 
   "rotate-right": "rotate-right",
 };
 
+// The four one-click discrete-rotate buttons, distinct from the continuous
+// rotate-left/rotate-right D-pad buttons above (which spin only while held).
+// Single source of truth for both renderMovement()'s disabled-state loop and
+// the click-listener wiring at the bottom of this file.
+const DISCRETE_ROTATE_BUTTONS: ReadonlyArray<{
+  id: string;
+  direction: "left" | "right";
+  angleDegrees: 90 | 180;
+}> = [
+  { id: "rotate-90-left-button", direction: "left", angleDegrees: 90 },
+  { id: "rotate-90-right-button", direction: "right", angleDegrees: 90 },
+  { id: "rotate-180-left-button", direction: "left", angleDegrees: 180 },
+  { id: "rotate-180-right-button", direction: "right", angleDegrees: 180 },
+];
+
 // ~300ms = the firmware's fixed 200ms pulse + 100ms margin, per ADR-001
 // (.gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
 const SHOOT_COOLDOWN_MS = 300;
@@ -88,40 +111,61 @@ let shootCooldownEnabled = true;
 // folded into the pure mapping function.
 let shootCooldownActive = false;
 
-type AimDirection = "up" | "down";
+type PanDirection = "left" | "right";
 
-// Fixed 400ms repeat cadence while an aim button is held, matching the
+// Fixed 400ms repeat cadence while a pan button is held, matching the
 // firmware's own ~300-400ms blocking interpolation time per ADR-001 — this
 // ensures only one angle command is ever in flight, preventing TCP buffer
 // backlog.
-const AIM_REPEAT_INTERVAL_MS = 400;
+const PAN_REPEAT_INTERVAL_MS = 400;
 
 // Step sizes in degrees per repeat tick, per ADR-001's Fast/Slow dropdown.
-const AIM_STEP_DEGREES: Record<"fast" | "slow", number> = {
+const PAN_STEP_DEGREES: Record<"fast" | "slow", number> = {
   fast: 10,
   slow: 5,
 };
 
-const MIN_AIM_ANGLE = 1;
-const MAX_AIM_ANGLE = 180;
+const MIN_PAN_ANGLE = 1;
+const MAX_PAN_ANGLE = 180;
 
-// App-tracked aim angle — no protocol readback exists (per ADR-001), so
+// App-tracked pan angle — no protocol readback exists (per ADR-001), so
 // this mirrors the `lightsOn` precedent: purely what the app last told the
 // servo to do. Defaults to 90, the firmware's own boot default.
-let aimAngle = 90;
+let panAngle = 90;
 
 // User-selected step size for held-button repeats, per ADR-001's
 // Fast/Slow dropdown. Fast is the default.
-let aimSpeed: "fast" | "slow" = "fast";
+let panSpeed: "fast" | "slow" = "fast";
 
-// The aim button currently held (or null when neither is held). A new
+// The pan button currently held (or null when neither is held). A new
 // pointerdown on the other button interrupts the current hold, mirroring
 // the movement D-pad's interrupt semantics.
-let aimHoldDirection: AimDirection | null = null;
+let panHoldDirection: PanDirection | null = null;
 
 // The setInterval handle driving the throttled repeat while a button is
 // held; null when nothing is held.
-let aimRepeatTimer: ReturnType<typeof setInterval> | null = null;
+let panRepeatTimer: ReturnType<typeof setInterval> | null = null;
+
+// Each log panel's currently-displayed lines. Per spec.md, neither panel
+// auto-clears on connect/disconnect/reconnect — only an explicit Clear click
+// (or app restart) empties these — so nothing here is reset by the
+// onStatus/onUsbStatus handlers below, unlike lightsOn/panAngle. wifiLogLines
+// is fed live by onWifiLogLines below; usbLogLines is fed live by
+// onUsbLogLines below.
+let wifiLogLines: string[] = [];
+let usbLogLines: string[] = [];
+
+// State for the USB Log panel's own Connect/Disconnect toggle button, per
+// spec.md's "reuses the app's existing single-button toggle pattern"
+// decision. Mirrors `currentState` above exactly: `UsbSerialConnection` now
+// has the same always-resolves `connect()`/`disconnect()` contract as
+// `CarConnection`, with real success/failure (connected, or an error such as
+// "no CH340 adapter found") arriving via the `onUsbLogStatus` push below —
+// per review round-1 fix ticket 02, replacing the app-tracked boolean this
+// used to be (which had no way to show the operator *why* a Connect attempt
+// failed). No initial-state query exists, so a fresh `UsbSerialConnection`
+// starts `disconnected`, matching `currentState`'s same default.
+let usbLogState: UsbLogState = { status: "disconnected", message: null };
 
 function render(state: ConnectionState): void {
   const button = document.getElementById("toggle-button") as HTMLButtonElement;
@@ -136,7 +180,7 @@ function render(state: ConnectionState): void {
   renderLights(state);
   renderMovement(state);
   renderShoot(state);
-  renderAim(state);
+  renderPan(state);
 }
 
 function renderLights(state: ConnectionState): void {
@@ -149,15 +193,23 @@ function renderLights(state: ConnectionState): void {
 
 function renderMovement(state: ConnectionState): void {
   const movementUiState = mapMovementControlUiState(state);
+  // Connection gating and the discrete-rotate pulse's timed disable are
+  // independent concerns (mirrors renderShoot()'s shootCooldownActive
+  // composition) — either one alone is enough to keep the whole
+  // movement/rotate button set disabled, per ADR-002.
+  const disabled = movementUiState.disabled || rotateCooldownActive;
 
   for (const id of Object.values(MOVEMENT_BUTTON_IDS)) {
-    (document.getElementById(id) as HTMLButtonElement).disabled = movementUiState.disabled;
+    (document.getElementById(id) as HTMLButtonElement).disabled = disabled;
+  }
+  for (const { id } of DISCRETE_ROTATE_BUTTONS) {
+    (document.getElementById(id) as HTMLButtonElement).disabled = disabled;
   }
 }
 
 // USB badge is independent of ConnectionState and has no local mirrored
 // state of its own, per ADR-002 — it renders directly from whatever
-// `onUsbStatus` last pushed, unlike renderLights/renderAim/etc. which mix in
+// `onUsbStatus` last pushed, unlike renderLights/renderPan/etc. which mix in
 // app-tracked local variables. Not part of the render(state) cycle: it must
 // not be affected by, or reset alongside, Wi-Fi connect/disconnect/error
 // transitions (see implement-03 notes on why the three-reset-points
@@ -166,6 +218,66 @@ function renderUsbStatus(connected: boolean): void {
   const usbStatusText = document.getElementById("usb-status-text") as HTMLElement;
   usbStatusText.textContent = connected ? "USB: Connected" : "USB: Not connected";
   usbStatusText.className = connected ? "usb-status-connected" : "usb-status-disconnected";
+}
+
+// Thin DOM-wiring for the two log panels, per spec.md's "one small,
+// reusable piece of log-panel logic shared by both panels" decision —
+// each just points renderLogPanel() at its own DOM element and its own
+// locally-tracked lines array.
+function renderWifiLog(): void {
+  const panel = document.getElementById("wifi-log-panel") as HTMLElement;
+  renderLogPanel(panel, wifiLogLines);
+}
+
+function renderUsbLog(): void {
+  const panel = document.getElementById("usb-log-panel") as HTMLElement;
+  renderLogPanel(panel, usbLogLines);
+}
+
+function handleWifiLogClear(): void {
+  wifiLogLines = clearLogLines();
+  renderWifiLog();
+}
+
+function handleUsbLogClear(): void {
+  usbLogLines = clearLogLines();
+  renderUsbLog();
+}
+
+// Single toggle button + status text driven by `usbLogState`, mirroring the
+// main Wi-Fi toggle-button's `render()` shape (see spec.md's "reuses the
+// app's existing single-button toggle pattern" decision), independent of
+// `currentState`/`render(state)` — the USB serial port has no relationship
+// to the Wi-Fi connection lifecycle. `mapUsbLogControlUiState` is the same
+// kind of pure status-to-UI mapper `mapConnectionStatusToUiState` is for the
+// Wi-Fi button, so a failed Connect attempt (no CH340 detected, a port-open
+// error) now has a visible statusText, not just a console.error.
+function renderUsbLogControls(): void {
+  const button = document.getElementById("usb-log-toggle-button") as HTMLButtonElement;
+  const statusText = document.getElementById("usb-log-status-text") as HTMLElement;
+  const uiState = mapUsbLogControlUiState(usbLogState);
+
+  button.textContent = uiState.buttonLabel;
+  button.disabled = uiState.buttonDisabled;
+  statusText.textContent = uiState.statusText;
+  statusText.className = uiState.statusClass;
+}
+
+function handleUsbLogToggleClick(): void {
+  const action =
+    usbLogState.status === "connected" || usbLogState.status === "connecting"
+      ? window.carAPI.usbLogDisconnect()
+      : window.carAPI.usbLogConnect();
+
+  // Mirrors handleToggleClick(): rejects synchronously only for an invalid
+  // current state (e.g. a stray double-click racing a status push already
+  // in flight) — the real success/failure signal for the button/status text
+  // is the onUsbLogStatus push below, not this promise's resolution, per
+  // usbSerialConnection.ts's now-aligned contract with
+  // CarConnection.connect().
+  action.catch((error: unknown) => {
+    console.error("USB Log connect/disconnect failed:", error);
+  });
 }
 
 function renderShoot(state: ConnectionState): void {
@@ -207,15 +319,15 @@ function handleLightToggleClick(): void {
   });
 }
 
-function renderAim(state: ConnectionState): void {
-  const upButton = document.getElementById("aim-up-button") as HTMLButtonElement;
-  const downButton = document.getElementById("aim-down-button") as HTMLButtonElement;
-  const angleText = document.getElementById("aim-angle-text") as HTMLElement;
-  const aimUiState = mapAimControlUiState(state, aimAngle);
+function renderPan(state: ConnectionState): void {
+  const leftButton = document.getElementById("pan-left-button") as HTMLButtonElement;
+  const rightButton = document.getElementById("pan-right-button") as HTMLButtonElement;
+  const angleText = document.getElementById("pan-angle-text") as HTMLElement;
+  const panUiState = mapPanControlUiState(state, panAngle);
 
-  upButton.disabled = aimUiState.upDisabled;
-  downButton.disabled = aimUiState.downDisabled;
-  angleText.textContent = `Aim: ${aimAngle}°`;
+  leftButton.disabled = panUiState.leftDisabled;
+  rightButton.disabled = panUiState.rightDisabled;
+  angleText.textContent = `Pan: ${panAngle}°`;
 }
 
 function handleShootClick(): void {
@@ -293,28 +405,94 @@ function clearActiveMovement(): void {
   activeDirection = null;
 }
 
+// Placeholder pulse durations pending real hardware calibration, per
+// ADR-002 — if live testing shows these are wrong, these are the two lines
+// to tune, matching the same "unverified assumption" precedent as
+// PAN_ANGLE_DELTA below.
+const ROTATE_90_MS = 400;
+const ROTATE_180_MS = 800;
+
+// Mirrors shootCooldownActive's pattern, but unlike Shoot's cooldown (which
+// disables only the Shoot button), this disables the entire movement/rotate
+// button set for the pulse's duration, per ADR-002.
+let rotateCooldownActive = false;
+
+// The setTimeout handle driving the in-flight discrete-rotate pulse; null
+// when no pulse is active.
+let discreteRotateTimer: ReturnType<typeof setTimeout> | null = null;
+
+// One-click pulse: interrupts any held D-pad direction/continuous rotate
+// first (per grill/decisions.md's interrupt-semantics decision, extended to
+// the discrete-rotate buttons by ADR-002), then spins for a fixed
+// placeholder duration before stopping on its own.
+function handleDiscreteRotate(direction: "left" | "right", angleDegrees: 90 | 180): void {
+  stopActiveMovement();
+
+  rotateCooldownActive = true;
+  renderMovement(currentState);
+
+  sendMovement(direction === "left" ? "rotate-left" : "rotate-right");
+
+  const durationMs = angleDegrees === 90 ? ROTATE_90_MS : ROTATE_180_MS;
+  discreteRotateTimer = setTimeout(() => {
+    discreteRotateTimer = null;
+    sendMovement("stop");
+    rotateCooldownActive = false;
+    renderMovement(currentState);
+  }, durationMs);
+}
+
+// Used by window.blur: the connection is still live here, so — mirroring
+// stopActiveMovement()'s reasoning — an in-flight pulse gets an explicit
+// Stop sent rather than left to finish on its own, and the button set
+// re-enables immediately instead of staying disabled until the original
+// timer would have fired.
+function stopActiveDiscreteRotate(): void {
+  if (discreteRotateTimer === null) {
+    return;
+  }
+  clearTimeout(discreteRotateTimer);
+  discreteRotateTimer = null;
+  rotateCooldownActive = false;
+  sendMovement("stop");
+  renderMovement(currentState);
+}
+
+// Used by the onStatus connection-drop path only: mirrors
+// clearActiveMovement()'s reasoning — the socket is already gone or about
+// to be, so sending Stop here would be a pointless IPC round-trip
+// guaranteed to fail. Pure local state reset; render(state) is called by
+// the onStatus handler right after this runs.
+function clearDiscreteRotateCooldown(): void {
+  if (discreteRotateTimer !== null) {
+    clearTimeout(discreteRotateTimer);
+    discreteRotateTimer = null;
+  }
+  rotateCooldownActive = false;
+}
+
 // Direction sign is a starting assumption per ADR-001, explicitly
 // unverified against the physical hardware — see the "Manual test: servo
 // direction verified" acceptance criterion. If live testing shows this is
 // backwards, this is the one line to flip.
-const AIM_ANGLE_DELTA: Record<AimDirection, 1 | -1> = {
-  up: 1,
-  down: -1,
+const PAN_ANGLE_DELTA: Record<PanDirection, 1 | -1> = {
+  left: 1,
+  right: -1,
 };
 
-// Computes one step, clamps it to [MIN_AIM_ANGLE, MAX_AIM_ANGLE], updates
+// Computes one step, clamps it to [MIN_PAN_ANGLE, MAX_PAN_ANGLE], updates
 // the app-tracked angle, sends it, and re-renders. Returns whether the
 // angle actually changed — used to stop the repeat timer once a bound is
 // reached, since further ticks in the same direction would be no-ops.
-function stepAim(direction: AimDirection): boolean {
-  const step = AIM_STEP_DEGREES[aimSpeed] * AIM_ANGLE_DELTA[direction];
-  const nextAngle = Math.min(MAX_AIM_ANGLE, Math.max(MIN_AIM_ANGLE, aimAngle + step));
-  const changed = nextAngle !== aimAngle;
-  aimAngle = nextAngle;
-  renderAim(currentState);
+function stepPan(direction: PanDirection): boolean {
+  const step = PAN_STEP_DEGREES[panSpeed] * PAN_ANGLE_DELTA[direction];
+  const nextAngle = Math.min(MAX_PAN_ANGLE, Math.max(MIN_PAN_ANGLE, panAngle + step));
+  const changed = nextAngle !== panAngle;
+  panAngle = nextAngle;
+  renderPan(currentState);
 
-  window.carAPI.setAimAngle(aimAngle).catch((error: unknown) => {
-    console.error("Set aim angle failed:", error);
+  window.carAPI.setPanAngle(panAngle).catch((error: unknown) => {
+    console.error("Set pan angle failed:", error);
   });
 
   return changed;
@@ -323,54 +501,60 @@ function stepAim(direction: AimDirection): boolean {
 // pointerdown always interrupts: a new hold overwrites the currently
 // tracked direction, mirroring the movement D-pad's interrupt semantics.
 // Fires one step immediately (real-time feedback on press), then repeats
-// at AIM_REPEAT_INTERVAL_MS while held.
-function handleAimPointerDown(direction: AimDirection): void {
-  stopActiveAim();
-  aimHoldDirection = direction;
+// at PAN_REPEAT_INTERVAL_MS while held.
+function handlePanPointerDown(direction: PanDirection): void {
+  stopActivePan();
+  panHoldDirection = direction;
 
-  const changed = stepAim(direction);
+  const changed = stepPan(direction);
   if (!changed) {
     // Already at the bound — nothing further to repeat.
-    aimHoldDirection = null;
+    panHoldDirection = null;
     return;
   }
 
-  aimRepeatTimer = setInterval(() => {
-    const stillChanging = stepAim(direction);
+  panRepeatTimer = setInterval(() => {
+    const stillChanging = stepPan(direction);
     if (!stillChanging) {
-      stopActiveAim();
+      stopActivePan();
     }
-  }, AIM_REPEAT_INTERVAL_MS);
+  }, PAN_REPEAT_INTERVAL_MS);
 }
 
 // pointerup/pointerleave/pointercancel all funnel through here. Only the
-// event whose direction matches the currently-held aimHoldDirection stops
+// event whose direction matches the currently-held panHoldDirection stops
 // the repeat timer — a release from a since-superseded button is a no-op,
 // matching the movement D-pad's release-matching semantics.
-function handleAimRelease(direction: AimDirection): void {
-  if (aimHoldDirection !== direction) {
+function handlePanRelease(direction: PanDirection): void {
+  if (panHoldDirection !== direction) {
     return;
   }
-  stopActiveAim();
+  stopActivePan();
 }
 
 // Clears the repeat timer and the held-direction tracking. Used by
 // pointerup/release, window-blur, and once a bound is reached mid-repeat.
-function stopActiveAim(): void {
-  if (aimRepeatTimer !== null) {
-    clearInterval(aimRepeatTimer);
-    aimRepeatTimer = null;
+function stopActivePan(): void {
+  if (panRepeatTimer !== null) {
+    clearInterval(panRepeatTimer);
+    panRepeatTimer = null;
   }
-  aimHoldDirection = null;
+  panHoldDirection = null;
 }
 
-function handleAimSpeedChange(event: Event): void {
-  aimSpeed = (event.target as HTMLSelectElement).value as "fast" | "slow";
+function handlePanSpeedChange(event: Event): void {
+  panSpeed = (event.target as HTMLSelectElement).value as "fast" | "slow";
 }
 
 render(currentState);
+renderWifiLog();
+renderUsbLog();
+renderUsbLogControls();
 
 document.getElementById("toggle-button")!.addEventListener("click", handleToggleClick);
+document.getElementById("wifi-log-clear-button")!.addEventListener("click", handleWifiLogClear);
+document.getElementById("usb-log-clear-button")!.addEventListener("click", handleUsbLogClear);
+document.getElementById("usb-log-toggle-button")!.addEventListener("click", handleUsbLogToggleClick);
 document.getElementById("light-button")!.addEventListener("click", handleLightToggleClick);
 document.getElementById("shoot-button")!.addEventListener("click", handleShootClick);
 document
@@ -387,24 +571,31 @@ for (const [direction, id] of Object.entries(MOVEMENT_BUTTON_IDS) as Array<
   button.addEventListener("pointercancel", () => handleMovementRelease(direction));
 }
 
-const AIM_BUTTON_IDS: Record<AimDirection, string> = {
-  up: "aim-up-button",
-  down: "aim-down-button",
+const PAN_BUTTON_IDS: Record<PanDirection, string> = {
+  left: "pan-left-button",
+  right: "pan-right-button",
 };
 
-for (const [direction, id] of Object.entries(AIM_BUTTON_IDS) as Array<[AimDirection, string]>) {
+for (const [direction, id] of Object.entries(PAN_BUTTON_IDS) as Array<[PanDirection, string]>) {
   const button = document.getElementById(id)!;
-  button.addEventListener("pointerdown", () => handleAimPointerDown(direction));
-  button.addEventListener("pointerup", () => handleAimRelease(direction));
-  button.addEventListener("pointerleave", () => handleAimRelease(direction));
-  button.addEventListener("pointercancel", () => handleAimRelease(direction));
+  button.addEventListener("pointerdown", () => handlePanPointerDown(direction));
+  button.addEventListener("pointerup", () => handlePanRelease(direction));
+  button.addEventListener("pointerleave", () => handlePanRelease(direction));
+  button.addEventListener("pointercancel", () => handlePanRelease(direction));
 }
 
-document.getElementById("aim-speed-select")!.addEventListener("change", handleAimSpeedChange);
+document.getElementById("pan-speed-select")!.addEventListener("change", handlePanSpeedChange);
+
+for (const { id, direction, angleDegrees } of DISCRETE_ROTATE_BUTTONS) {
+  document
+    .getElementById(id)!
+    .addEventListener("click", () => handleDiscreteRotate(direction, angleDegrees));
+}
 
 window.addEventListener("blur", () => {
   stopActiveMovement();
-  stopActiveAim();
+  stopActivePan();
+  stopActiveDiscreteRotate();
 });
 
 window.carAPI.onStatus((state) => {
@@ -419,7 +610,7 @@ window.carAPI.onStatus((state) => {
     // decision: no protocol readback exists for the servo angle either, so
     // the app must not carry over a stale angle assumption across a fresh
     // connect/reconnect, disconnect, or error.
-    aimAngle = 90;
+    panAngle = 90;
   }
 
   // Movement commands only work over an active tcp100 session — if the
@@ -429,11 +620,15 @@ window.carAPI.onStatus((state) => {
   // sent: the socket is already gone or about to be, per ADR-001.
   if (state.status !== "connected" || state.protocol !== "tcp100") {
     clearActiveMovement();
-    // Same reasoning as movement above: aim commands only work over an
-    // active tcp100 session, so a held aim button's repeat timer must stop
-    // rather than keep firing calls that CarConnection.setAimAngle() would
+    // Same reasoning as movement above: pan commands only work over an
+    // active tcp100 session, so a held pan button's repeat timer must stop
+    // rather than keep firing calls that CarConnection.setPanAngle() would
     // just reject.
-    stopActiveAim();
+    stopActivePan();
+    // Same reasoning again: a mid-pulse disconnect must not leave the
+    // movement/rotate button set stuck disabled, nor let a stale setTimeout
+    // fire a doomed Stop call later once the session is already gone.
+    clearDiscreteRotateCooldown();
   }
 
   currentState = state;
@@ -445,4 +640,40 @@ window.carAPI.onStatus((state) => {
 // process, per ADR-002/this ticket's acceptance criteria.
 window.carAPI.onUsbStatus((connected) => {
   renderUsbStatus(connected);
+});
+
+// USB Log panel's Connect/Disconnect status, mirroring window.carAPI.onStatus
+// above exactly: the module has no local polling of its own — it only ever
+// reflects whatever the last "car:usb-log-status" push carried (connected,
+// or an error such as "no CH340 adapter found"/a port-open failure), per
+// review round-1 fix ticket 02. This also means a mid-stream unplug now
+// self-corrects the button/status text on its own, since UsbSerialConnection
+// already emits "state-change" for that case — no more waiting for the
+// user's next click.
+window.carAPI.onUsbLogStatus((state) => {
+  usbLogState = state;
+  renderUsbLogControls();
+});
+
+// Wi-Fi Log panel: appends each pushed batch of lines (already timestamped
+// by LogLineBuffer on the main-process side) via the shared append-with-cap
+// helper in a single call, then re-renders once per batch — not once per
+// line — per review-round-2 fix ticket 01 (car-log-viewer plan): a chunk
+// that produced many lines still means exactly one DOM update here. No
+// separate control needed — this only ever fires while a tcp100 session is
+// live (see carConnection.ts's class doc comment), so it naturally goes
+// quiet on disconnect or an http80 session without this handler needing to
+// gate on `currentState` itself.
+window.carAPI.onWifiLogLines((lines) => {
+  wifiLogLines = appendLogLines(wifiLogLines, lines);
+  renderWifiLog();
+});
+
+// USB Log panel: same append-with-cap/re-render-per-batch shape as
+// onWifiLogLines above. Only ever fires while the USB serial port is open
+// (see `UsbSerialConnection`'s class doc comment) — no separate gating
+// needed here either.
+window.carAPI.onUsbLogLines((lines) => {
+  usbLogLines = appendLogLines(usbLogLines, lines);
+  renderUsbLog();
 });

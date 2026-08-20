@@ -21,6 +21,7 @@ import {
   SHOOT_VALUE,
   type MovementDirection,
 } from "./commandFrame.ts";
+import { LogLineBuffer } from "./logLineBuffer.ts";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
@@ -68,6 +69,26 @@ const DISCONNECTED_STATE: ConnectionState = {
  * transitions to `error`, never `disconnected` (see `checkHttpLiveness()`).
  * `disconnected` is still reachable for an http80 session, but only via the
  * user's own `disconnect()` call — the one genuinely clean path.
+ *
+ * A tcp100 session additionally emits a "log-lines" event carrying an array
+ * of newline-delimited, timestamp-prefixed lines found in the raw bytes
+ * received on the socket (via `LogLineBuffer`, see logLineBuffer.ts) — an
+ * additive event alongside "state-change", per spec.md's "Wi-Fi log emission
+ * path" decision (car-log-viewer plan). Scoped strictly to tcp100: an http80
+ * session never holds a persistent socket open to listen on, so it never
+ * emits this event — that's expected behavior, not an error path.
+ *
+ * Batched per `data` chunk (one "log-lines" event per chunk, carrying every
+ * complete line `LogLineBuffer.push()` returned for it), not one event per
+ * line — per review-round-2 fix ticket 01 (car-log-viewer plan). A chunk
+ * consisting mostly of newline bytes can otherwise yield tens of thousands
+ * of lines from a single `push()` call; emitting each as its own event would
+ * mean tens of thousands of synchronous IPC sends and DOM reflows from one
+ * burst of socket data, which — since the tcp100 socket is unauthenticated/
+ * unencrypted — a LAN attacker spoofing/MITM-ing the car's endpoint could
+ * use to stall the main process and freeze the renderer. Never emitted with
+ * an empty array: a chunk with no complete lines in it (still-buffered
+ * partial data) emits nothing.
  */
 export class CarConnection extends EventEmitter {
   private readonly host: string;
@@ -226,7 +247,7 @@ export class CarConnection extends EventEmitter {
   }
 
   /**
-   * Convenience wrapper over `sendCommandFrame()` for the QD005 aim servo
+   * Convenience wrapper over `sendCommandFrame()` for the QD005 pan servo
    * (see ADR-001 at
    * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
    * `angle` is sent as-is as the absolute-angle value byte — range
@@ -236,7 +257,7 @@ export class CarConnection extends EventEmitter {
    * gating/rejection contract as `setLedState()`/`setMovement()`/`shoot()`,
    * inherited from `sendCommandFrame()` rather than duplicated here.
    */
-  async setAimAngle(angle: number): Promise<void> {
+  async setPanAngle(angle: number): Promise<void> {
     await this.sendCommandFrame(
       buildCommandFrame({ action: CMD_RUN, device: DEVICE_SERVO, value: angle }),
     );
@@ -253,6 +274,12 @@ export class CarConnection extends EventEmitter {
    * onward and reused for the post-connect session, so there is never a
    * window where the socket has zero listeners (an unhandled `error` event
    * on a `net.Socket` crashes the process).
+   *
+   * Once held, the socket also gets a `data` listener that feeds a
+   * per-session `LogLineBuffer` and re-emits every completed line from that
+   * chunk as one "log-lines" event (see the class doc comment). A fresh
+   * buffer per successful probe means a later reconnect starts with no
+   * carried-over partial-line state from a previous session.
    */
   private probeTcpAndHold(): Promise<boolean> {
     return new Promise((resolve) => {
@@ -272,6 +299,15 @@ export class CarConnection extends EventEmitter {
       socket.once("connect", () => {
         socket.setTimeout(0);
         this.socket = socket;
+
+        const logLineBuffer = new LogLineBuffer();
+        socket.on("data", (chunk: Buffer) => {
+          const lines = logLineBuffer.push(chunk);
+          if (lines.length > 0) {
+            this.emit("log-lines", lines);
+          }
+        });
+
         settleProbe(true);
       });
 

@@ -8,6 +8,7 @@ import type { MovementDirection } from "./commandFrame.ts";
 import {
   createCarIpcHandlers,
   forwardConnectionStatus,
+  forwardWifiLogLines,
   type CarConnectionLike,
 } from "./carIpcHandlers.ts";
 
@@ -35,7 +36,7 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   setLedStateCalls: boolean[] = [];
   setMovementCalls: MovementDirection[] = [];
   shootCallCount = 0;
-  setAimAngleCalls: number[] = [];
+  setPanAngleCalls: number[] = [];
 
   private state: ConnectionState;
   private readonly connectImpl: () => Promise<void>;
@@ -43,7 +44,7 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
   private readonly setLedStateImpl: (on: boolean) => Promise<void>;
   private readonly setMovementImpl: (direction: MovementDirection) => Promise<void>;
   private readonly shootImpl: () => Promise<void>;
-  private readonly setAimAngleImpl: (angle: number) => Promise<void>;
+  private readonly setPanAngleImpl: (angle: number) => Promise<void>;
 
   constructor(options: {
     initialState?: ConnectionState;
@@ -52,7 +53,7 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
     onSetLedState?: (on: boolean) => Promise<void>;
     onSetMovement?: (direction: MovementDirection) => Promise<void>;
     onShoot?: () => Promise<void>;
-    onSetAimAngle?: (angle: number) => Promise<void>;
+    onSetPanAngle?: (angle: number) => Promise<void>;
   } = {}) {
     super();
     this.state = options.initialState ?? { ...DISCONNECTED_STATE };
@@ -61,7 +62,7 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
     this.setLedStateImpl = options.onSetLedState ?? (async () => {});
     this.setMovementImpl = options.onSetMovement ?? (async () => {});
     this.shootImpl = options.onShoot ?? (async () => {});
-    this.setAimAngleImpl = options.onSetAimAngle ?? (async () => {});
+    this.setPanAngleImpl = options.onSetPanAngle ?? (async () => {});
   }
 
   getState(): ConnectionState {
@@ -93,9 +94,9 @@ class FakeCarConnection extends EventEmitter implements CarConnectionLike {
     await this.shootImpl();
   }
 
-  async setAimAngle(angle: number): Promise<void> {
-    this.setAimAngleCalls.push(angle);
-    await this.setAimAngleImpl(angle);
+  async setPanAngle(angle: number): Promise<void> {
+    this.setPanAngleCalls.push(angle);
+    await this.setPanAngleImpl(angle);
   }
 
   setState(next: ConnectionState): void {
@@ -271,53 +272,53 @@ test("handleShoot rejects when connection.shoot() rejects", async () => {
   await assert.rejects(() => handlers.handleShoot(), /sendCommandFrame/);
 });
 
-const VALID_AIM_ANGLES = [1, 5, 45, 90, 135, 179, 180];
+const VALID_PAN_ANGLES = [1, 5, 45, 90, 135, 179, 180];
 
-for (const angle of VALID_AIM_ANGLES) {
-  test(`handleSetAimAngle calls connection.setAimAngle(${angle})`, async () => {
+for (const angle of VALID_PAN_ANGLES) {
+  test(`handleSetPanAngle calls connection.setPanAngle(${angle})`, async () => {
     const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
     const handlers = createCarIpcHandlers(connection);
 
-    await handlers.handleSetAimAngle(angle);
+    await handlers.handleSetPanAngle(angle);
 
-    assert.deepEqual(connection.setAimAngleCalls, [angle]);
+    assert.deepEqual(connection.setPanAngleCalls, [angle]);
   });
 }
 
-const INVALID_AIM_ANGLES = [0, -1, 181, 500, 1.5, NaN, Infinity, -Infinity];
+const INVALID_PAN_ANGLES = [0, -1, 181, 500, 1.5, NaN, Infinity, -Infinity];
 
-for (const angle of INVALID_AIM_ANGLES) {
-  test(`handleSetAimAngle rejects out-of-range angle ${angle} without reaching connection.setAimAngle()`, async () => {
+for (const angle of INVALID_PAN_ANGLES) {
+  test(`handleSetPanAngle rejects out-of-range angle ${angle} without reaching connection.setPanAngle()`, async () => {
     const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
     const handlers = createCarIpcHandlers(connection);
 
-    await assert.rejects(() => handlers.handleSetAimAngle(angle), /Invalid aim angle/);
+    await assert.rejects(() => handlers.handleSetPanAngle(angle), /Invalid pan angle/);
 
-    assert.deepEqual(connection.setAimAngleCalls, []);
+    assert.deepEqual(connection.setPanAngleCalls, []);
   });
 }
 
-test("handleSetAimAngle rejects a non-number angle without reaching connection.setAimAngle()", async () => {
+test("handleSetPanAngle rejects a non-number angle without reaching connection.setPanAngle()", async () => {
   const connection = new FakeCarConnection({ initialState: CONNECTED_STATE });
   const handlers = createCarIpcHandlers(connection);
 
   await assert.rejects(
-    () => handlers.handleSetAimAngle("90" as unknown as number),
-    /Invalid aim angle/,
+    () => handlers.handleSetPanAngle("90" as unknown as number),
+    /Invalid pan angle/,
   );
 
-  assert.deepEqual(connection.setAimAngleCalls, []);
+  assert.deepEqual(connection.setPanAngleCalls, []);
 });
 
-test("handleSetAimAngle rejects when connection.setAimAngle() rejects", async () => {
+test("handleSetPanAngle rejects when connection.setPanAngle() rejects", async () => {
   const connection = new FakeCarConnection({
-    onSetAimAngle: async () => {
+    onSetPanAngle: async () => {
       throw new Error('sendCommandFrame() called while status is "disconnected" and protocol is "null"');
     },
   });
   const handlers = createCarIpcHandlers(connection);
 
-  await assert.rejects(() => handlers.handleSetAimAngle(90), /sendCommandFrame/);
+  await assert.rejects(() => handlers.handleSetPanAngle(90), /sendCommandFrame/);
 });
 
 test("forwardConnectionStatus forwards every state-change event", () => {
@@ -347,6 +348,37 @@ test("forwardConnectionStatus's unsubscribe stops further forwarding", () => {
   unsubscribe();
 
   connection.setState(CONNECTED_STATE);
+
+  assert.deepEqual(received, []);
+});
+
+test('forwardWifiLogLines forwards every "log-lines" batch as a single call', () => {
+  const connection = new FakeCarConnection();
+  const received: string[][] = [];
+
+  forwardWifiLogLines(connection, (lines) => {
+    received.push(lines);
+  });
+
+  connection.emit("log-lines", ["[00:00:00.000] first", "[00:00:00.001] second"]);
+  connection.emit("log-lines", ["[00:00:00.002] third"]);
+
+  assert.deepEqual(received, [
+    ["[00:00:00.000] first", "[00:00:00.001] second"],
+    ["[00:00:00.002] third"],
+  ]);
+});
+
+test("forwardWifiLogLines's unsubscribe stops further forwarding", () => {
+  const connection = new FakeCarConnection();
+  const received: string[][] = [];
+
+  const unsubscribe = forwardWifiLogLines(connection, (lines) => {
+    received.push(lines);
+  });
+  unsubscribe();
+
+  connection.emit("log-lines", ["[00:00:00.000] should not arrive"]);
 
   assert.deepEqual(received, []);
 });

@@ -1,44 +1,44 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import * as path from "node:path";
 import { test } from "node:test";
 
+import type { SerialPortIdentity } from "./ch340Port.ts";
 import { isUsbSerialDevicePresent, startUsbStatusPolling } from "./usbStatus.ts";
 
-function makeTempDeviceDir(): string {
-  return mkdtempSync(path.join(tmpdir(), "usb-status-test-"));
+// `isCh340Port`/`findCh340PortPath` themselves are tested in
+// ch340Port.test.ts (see that file's header comment) — this file only
+// exercises usbStatus.ts's own additions: the list-based presence check and
+// the poll/push-on-change wrapper around it.
+function fakePort(vendorId: string | undefined, productId: string | undefined): SerialPortIdentity {
+  return { path: "COM3", vendorId, productId };
 }
 
-test("isUsbSerialDevicePresent returns true when a cu.usbserial-* entry exists in the directory", () => {
-  const dir = makeTempDeviceDir();
-  writeFileSync(path.join(dir, "cu.usbserial-1420"), "");
+test("isUsbSerialDevicePresent returns true when the injected list includes a CH340 port", async () => {
+  const listPorts = async (): Promise<SerialPortIdentity[]> => [
+    fakePort("0403", "6001"),
+    fakePort("1a86", "7523"),
+  ];
 
-  assert.equal(isUsbSerialDevicePresent(dir), true);
+  assert.equal(await isUsbSerialDevicePresent(listPorts), true);
 });
 
-test("isUsbSerialDevicePresent returns false when no cu.usbserial-* entry exists", () => {
-  const dir = makeTempDeviceDir();
-  writeFileSync(path.join(dir, "cu.Bluetooth-Incoming-Port"), "");
+test("isUsbSerialDevicePresent returns false when the injected list has no CH340 port", async () => {
+  const listPorts = async (): Promise<SerialPortIdentity[]> => [fakePort("0403", "6001")];
 
-  assert.equal(isUsbSerialDevicePresent(dir), false);
+  assert.equal(await isUsbSerialDevicePresent(listPorts), false);
 });
 
-test("isUsbSerialDevicePresent returns false for a directory that doesn't exist", () => {
-  assert.equal(isUsbSerialDevicePresent("/nonexistent-usb-status-test-dir"), false);
+test("isUsbSerialDevicePresent returns false when the injected list is empty", async () => {
+  const listPorts = async (): Promise<SerialPortIdentity[]> => [];
+
+  assert.equal(await isUsbSerialDevicePresent(listPorts), false);
 });
 
-test("isUsbSerialDevicePresent returns false on non-macOS platforms even if a matching entry exists", () => {
-  const dir = makeTempDeviceDir();
-  writeFileSync(path.join(dir, "cu.usbserial-1420"), "");
+test("isUsbSerialDevicePresent returns false rather than throwing when listPorts rejects", async () => {
+  const listPorts = async (): Promise<SerialPortIdentity[]> => {
+    throw new Error("native binding failure");
+  };
 
-  const originalPlatform = process.platform;
-  Object.defineProperty(process, "platform", { value: "win32" });
-  try {
-    assert.equal(isUsbSerialDevicePresent(dir), false);
-  } finally {
-    Object.defineProperty(process, "platform", { value: originalPlatform });
-  }
+  assert.equal(await isUsbSerialDevicePresent(listPorts), false);
 });
 
 test("startUsbStatusPolling pushes the initial detected state immediately when a device is present", () => {
@@ -123,4 +123,17 @@ test("startUsbStatusPolling's stop function halts further polling", (t) => {
   t.mock.timers.tick(2000);
 
   assert.deepEqual(received, []);
+});
+
+test("startUsbStatusPolling supports an async checkDevicePresent, pushing once it resolves", async () => {
+  const received: boolean[] = [];
+
+  const stop = startUsbStatusPolling(
+    () => Promise.resolve(true),
+    (connected) => received.push(connected),
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(received, [true]);
+  stop();
 });

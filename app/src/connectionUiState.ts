@@ -129,29 +129,95 @@ export function mapShootControlUiState(connection: ConnectionState): ShootContro
 
 // Firmware-supported servo range, per ADR-001 at
 // .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md.
-const MIN_AIM_ANGLE = 1;
-const MAX_AIM_ANGLE = 180;
+const MIN_PAN_ANGLE = 1;
+const MAX_PAN_ANGLE = 180;
 
-export interface AimControlUiState {
-  upDisabled: boolean;
-  downDisabled: boolean;
+// Redeclared locally for the same reason `ConnectionState` is above: this
+// file compiles into the ES-module renderer build, but the real
+// `UsbSerialState`/`UsbSerialStatus` types live in usbSerialConnection.ts, a
+// CommonJS main-process file. Keep in sync with that file's types by hand.
+export type UsbLogStatus = "disconnected" | "connecting" | "connected" | "error";
+export interface UsbLogState {
+  status: UsbLogStatus;
+  message: string | null;
+}
+
+export interface UsbLogControlUiState {
+  buttonLabel: "Connect" | "Connecting…" | "Disconnect";
+  buttonDisabled: boolean;
+  statusText: string;
+  statusClass:
+    | "usb-log-status-disconnected"
+    | "usb-log-status-connecting"
+    | "usb-log-status-connected"
+    | "usb-log-status-error";
 }
 
 /**
- * Pure `ConnectionState` + current angle -> Up/Down button UI state
- * mapping, per ADR-001's "Gating and enablement" decision — Aim reuses the
+ * Pure `UsbLogStatus` (+ message) -> USB Log toggle button/status-text UI
+ * state mapping, mirroring `mapConnectionStatusToUiState()` above exactly —
+ * per review round-1 fix ticket 02, the USB Log Connect button now renders
+ * from a real status push (`onUsbLogStatus`) instead of the app-tracked
+ * boolean it used before, so a failed Connect attempt (no CH340 detected, a
+ * port-open error) has a visible statusText for the operator instead of only
+ * a console.error.
+ */
+export function mapUsbLogControlUiState(state: UsbLogState): UsbLogControlUiState {
+  switch (state.status) {
+    case "disconnected":
+      return {
+        buttonLabel: "Connect",
+        buttonDisabled: false,
+        statusText: "Not connected",
+        statusClass: "usb-log-status-disconnected",
+      };
+    case "connecting":
+      return {
+        buttonLabel: "Connecting…",
+        buttonDisabled: true,
+        statusText: "Connecting…",
+        statusClass: "usb-log-status-connecting",
+      };
+    case "connected":
+      return {
+        buttonLabel: "Disconnect",
+        buttonDisabled: false,
+        statusText: state.message ?? "Connected",
+        statusClass: "usb-log-status-connected",
+      };
+    case "error":
+      // Button stays enabled (not disabled) so the user can retry
+      // immediately after fixing the underlying issue, mirroring
+      // mapConnectionStatusToUiState()'s identical "error" case.
+      return {
+        buttonLabel: "Connect",
+        buttonDisabled: false,
+        statusText: state.message ?? "USB Log connection error",
+        statusClass: "usb-log-status-error",
+      };
+  }
+}
+
+export interface PanControlUiState {
+  leftDisabled: boolean;
+  rightDisabled: boolean;
+}
+
+/**
+ * Pure `ConnectionState` + current angle -> Left/Right button UI state
+ * mapping, per ADR-001's "Gating and enablement" decision — Pan reuses the
  * same `connected && tcp100` predicate as lights/movement/shoot, combined
  * with the angle-bound edge cases at 1 and 180 (per ADR-001's "Bounds"
- * decision: Up disabled at angle >= 180, Down disabled at angle <= 1).
+ * decision: Left disabled at angle >= 180, Right disabled at angle <= 1).
  * Either condition alone is enough to disable a button. The speed-dropdown
  * selection and the press-and-hold repeat timer are separate,
  * DOM-timer-driven concerns layered on top by the renderer — deliberately
  * not part of this pure, connection-state-and-angle-only mapping.
  */
-export function mapAimControlUiState(connection: ConnectionState, angle: number): AimControlUiState {
+export function mapPanControlUiState(connection: ConnectionState, angle: number): PanControlUiState {
   const connectionDisabled = connection.status !== "connected" || connection.protocol !== "tcp100";
   return {
-    upDisabled: connectionDisabled || angle >= MAX_AIM_ANGLE,
-    downDisabled: connectionDisabled || angle <= MIN_AIM_ANGLE,
+    leftDisabled: connectionDisabled || angle >= MAX_PAN_ANGLE,
+    rightDisabled: connectionDisabled || angle <= MIN_PAN_ANGLE,
   };
 }

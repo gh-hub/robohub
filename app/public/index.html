@@ -94,31 +94,48 @@
         opacity: 0.6;
       }
 
-      #aim-controls {
+      .dpad-discrete-rotate-row {
+        margin-top: 0.5rem;
+        display: flex;
+        gap: 0.25rem;
+      }
+
+      .dpad-discrete-rotate-row button {
+        font-size: 1rem;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+      }
+
+      .dpad-discrete-rotate-row button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #pan-controls {
         margin-top: 1.5rem;
       }
 
-      #aim-up-button,
-      #aim-down-button {
+      #pan-left-button,
+      #pan-right-button {
         font-size: 1.1rem;
         padding: 0.5rem 1rem;
         margin-right: 0.5rem;
         cursor: pointer;
       }
 
-      #aim-up-button:disabled,
-      #aim-down-button:disabled {
+      #pan-left-button:disabled,
+      #pan-right-button:disabled {
         cursor: not-allowed;
         opacity: 0.6;
       }
 
-      #aim-speed-select {
+      #pan-speed-select {
         font-size: 1rem;
         padding: 0.4rem;
         margin-right: 0.75rem;
       }
 
-      #aim-angle-text {
+      #pan-angle-text {
         font-weight: 600;
       }
 
@@ -177,6 +194,73 @@
       .usb-status-connected {
         color: #1a7f37;
       }
+
+      #log-panels {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .log-panel-container {
+        flex: 1 1 20rem;
+        min-width: 20rem;
+      }
+
+      .log-panel-container h2 {
+        font-size: 1rem;
+        margin: 0 0 0.35rem 0;
+      }
+
+      .log-panel {
+        height: 10rem;
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 0.5rem;
+        margin: 0 0 0.35rem 0;
+        background: #fafafa;
+        font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+        font-size: 0.8rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .log-panel-clear-button {
+        font-size: 0.9rem;
+        padding: 0.3rem 0.9rem;
+        cursor: pointer;
+      }
+
+      #usb-log-toggle-button {
+        font-size: 0.9rem;
+        padding: 0.3rem 0.9rem;
+        margin-right: 0.5rem;
+        cursor: pointer;
+      }
+
+      #usb-log-status-text {
+        display: inline-block;
+        margin-right: 0.5rem;
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+
+      .usb-log-status-disconnected {
+        color: #666666;
+      }
+
+      .usb-log-status-connecting {
+        color: #b8860b;
+      }
+
+      .usb-log-status-connected {
+        color: #1a7f37;
+      }
+
+      .usb-log-status-error {
+        color: #cf222e;
+      }
     </style>
   </head>
   <body>
@@ -198,15 +282,21 @@
         <button id="rotate-left" type="button" disabled>&#8634; Rotate Left</button>
         <button id="rotate-right" type="button" disabled>&#8635; Rotate Right</button>
       </div>
+      <div class="dpad-discrete-rotate-row">
+        <button id="rotate-90-left-button" type="button" disabled>&#8634; 90&#176;</button>
+        <button id="rotate-90-right-button" type="button" disabled>&#8635; 90&#176;</button>
+        <button id="rotate-180-left-button" type="button" disabled>&#8634; 180&#176;</button>
+        <button id="rotate-180-right-button" type="button" disabled>&#8635; 180&#176;</button>
+      </div>
     </div>
-    <div id="aim-controls">
-      <button id="aim-up-button" type="button" disabled>&#9650; Up</button>
-      <button id="aim-down-button" type="button" disabled>&#9660; Down</button>
-      <select id="aim-speed-select">
+    <div id="pan-controls">
+      <button id="pan-left-button" type="button" disabled>&#9664; Left</button>
+      <button id="pan-right-button" type="button" disabled>&#9654; Right</button>
+      <select id="pan-speed-select">
         <option value="fast" selected>Fast</option>
         <option value="slow">Slow</option>
       </select>
-      <span id="aim-angle-text">Aim: 90°</span>
+      <span id="pan-angle-text">Pan: 90°</span>
     </div>
     <div id="shoot-controls">
       <button id="shoot-button" type="button" disabled>Shoot</button>
@@ -214,6 +304,20 @@
         <input type="checkbox" id="shoot-cooldown-toggle" checked />
         Cooldown
       </label>
+    </div>
+    <div id="log-panels">
+      <div class="log-panel-container">
+        <h2>Wi-Fi Log</h2>
+        <div id="wifi-log-panel" class="log-panel" aria-live="polite"></div>
+        <button id="wifi-log-clear-button" class="log-panel-clear-button" type="button">Clear</button>
+      </div>
+      <div class="log-panel-container">
+        <h2>USB Log</h2>
+        <div id="usb-log-panel" class="log-panel" aria-live="polite"></div>
+        <button id="usb-log-toggle-button" type="button">Connect</button>
+        <span id="usb-log-status-text" class="usb-log-status-disconnected">Not connected</span>
+        <button id="usb-log-clear-button" class="log-panel-clear-button" type="button">Clear</button>
+      </div>
     </div>
     <script type="module" src="../dist/renderer.js"></script>
   </body>

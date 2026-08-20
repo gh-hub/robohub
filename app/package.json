@@ -5,14 +5,19 @@
   "description": "Electron desktop app to connect to and control the ACEBOTT QD001 smart car over Wi-Fi/TCP.",
   "main": "dist/main.js",
   "scripts": {
+    "rebuild-native": "electron-rebuild -f -w serialport",
     "build": "tsc --project tsconfig.build.json && tsc --project tsconfig.renderer.json",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
     "test": "node --test src/**/*.test.ts"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@types/node": "^22.10.0",
     "electron": "^32.2.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "serialport": "^13.0.0"
   }
 }
