@@ -7,9 +7,10 @@ import type { MovementDirection } from "./commandFrame.ts";
 import {
   CAR_CONNECT_CHANNEL,
   CAR_DISCONNECT_CHANNEL,
+  CAR_SET_AIM_ANGLE_CHANNEL,
+  CAR_SET_DISTANCE_SENSOR_ANGLE_CHANNEL,
   CAR_SET_LIGHTS_CHANNEL,
   CAR_SET_MOVEMENT_CHANNEL,
-  CAR_SET_PAN_ANGLE_CHANNEL,
   CAR_SHOOT_CHANNEL,
   CAR_STATUS_CHANNEL,
   CAR_USB_LOG_CONNECT_CHANNEL,
@@ -38,8 +39,11 @@ ipcMain.handle(CAR_SET_MOVEMENT_CHANNEL, (_event, direction: MovementDirection) 
   carIpcHandlers.handleSetMovement(direction),
 );
 ipcMain.handle(CAR_SHOOT_CHANNEL, () => carIpcHandlers.handleShoot());
-ipcMain.handle(CAR_SET_PAN_ANGLE_CHANNEL, (_event, angle: number) =>
-  carIpcHandlers.handleSetPanAngle(angle),
+ipcMain.handle(CAR_SET_AIM_ANGLE_CHANNEL, (_event, angle: number) =>
+  carIpcHandlers.handleSetAimAngle(angle),
+);
+ipcMain.handle(CAR_SET_DISTANCE_SENSOR_ANGLE_CHANNEL, (_event, angle: number) =>
+  carIpcHandlers.handleSetDistanceSensorAngle(angle),
 );
 
 // Single, app-lifetime USB-serial connection instance for the USB Log panel

@@ -111,31 +111,71 @@
         opacity: 0.6;
       }
 
-      #pan-controls {
+      .boxed-section {
         margin-top: 1.5rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 0.75rem 1rem 1rem;
       }
 
-      #pan-left-button,
-      #pan-right-button {
+      .boxed-section h2 {
+        font-size: 1rem;
+        margin: 0 0 0.35rem 0;
+      }
+
+      #distance-sensor-controls {
+        margin-top: 0;
+      }
+
+      #distance-sensor-left-button,
+      #distance-sensor-right-button {
         font-size: 1.1rem;
         padding: 0.5rem 1rem;
         margin-right: 0.5rem;
         cursor: pointer;
       }
 
-      #pan-left-button:disabled,
-      #pan-right-button:disabled {
+      #distance-sensor-left-button:disabled,
+      #distance-sensor-right-button:disabled {
         cursor: not-allowed;
         opacity: 0.6;
       }
 
-      #pan-speed-select {
+      #distance-sensor-speed-select {
         font-size: 1rem;
         padding: 0.4rem;
         margin-right: 0.75rem;
       }
 
-      #pan-angle-text {
+      #distance-sensor-angle-text {
+        font-weight: 600;
+      }
+
+      #aim-controls {
+        margin-top: 0;
+      }
+
+      #aim-up-button,
+      #aim-down-button {
+        font-size: 1.1rem;
+        padding: 0.5rem 1rem;
+        margin-right: 0.5rem;
+        cursor: pointer;
+      }
+
+      #aim-up-button:disabled,
+      #aim-down-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+
+      #aim-speed-select {
+        font-size: 1rem;
+        padding: 0.4rem;
+        margin-right: 0.75rem;
+      }
+
+      #aim-angle-text {
         font-weight: 600;
       }
 
@@ -289,22 +329,37 @@
         <button id="rotate-180-right-button" type="button" disabled>&#8635; 180&#176;</button>
       </div>
     </div>
-    <div id="pan-controls">
-      <button id="pan-left-button" type="button" disabled>&#9664; Left</button>
-      <button id="pan-right-button" type="button" disabled>&#9654; Right</button>
-      <select id="pan-speed-select">
-        <option value="fast" selected>Fast</option>
-        <option value="slow">Slow</option>
-      </select>
-      <span id="pan-angle-text">Pan: 90°</span>
-    </div>
-    <div id="shoot-controls">
-      <button id="shoot-button" type="button" disabled>Shoot</button>
-      <label id="shoot-cooldown-toggle-label">
-        <input type="checkbox" id="shoot-cooldown-toggle" checked />
-        Cooldown
-      </label>
-    </div>
+    <section class="boxed-section">
+      <h2>Distance Sensor</h2>
+      <div id="distance-sensor-controls">
+        <button id="distance-sensor-left-button" type="button" disabled>&#9664; Left</button>
+        <button id="distance-sensor-right-button" type="button" disabled>&#9654; Right</button>
+        <select id="distance-sensor-speed-select">
+          <option value="fast" selected>Fast</option>
+          <option value="slow">Slow</option>
+        </select>
+        <span id="distance-sensor-angle-text">Distance Sensor: 90°</span>
+      </div>
+    </section>
+    <section class="boxed-section">
+      <h2>QD005 Water Gun</h2>
+      <div id="aim-controls">
+        <button id="aim-up-button" type="button" disabled>&#9650; Up</button>
+        <button id="aim-down-button" type="button" disabled>&#9660; Down</button>
+        <select id="aim-speed-select">
+          <option value="fast" selected>Fast</option>
+          <option value="slow">Slow</option>
+        </select>
+        <span id="aim-angle-text">Aim: 90°</span>
+      </div>
+      <div id="shoot-controls">
+        <button id="shoot-button" type="button" disabled>Shoot</button>
+        <label id="shoot-cooldown-toggle-label">
+          <input type="checkbox" id="shoot-cooldown-toggle" checked />
+          Cooldown
+        </label>
+      </div>
+    </section>
     <div id="log-panels">
       <div class="log-panel-container">
         <h2>Wi-Fi Log</h2>

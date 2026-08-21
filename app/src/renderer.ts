@@ -14,10 +14,11 @@
 // re-declared to match preload.ts's `CarApi` exactly; if that contract
 // ever changes, this must be updated by hand.
 import {
+  mapAimControlUiState,
   mapConnectionStatusToUiState,
+  mapDistanceSensorControlUiState,
   mapLightControlUiState,
   mapMovementControlUiState,
-  mapPanControlUiState,
   mapShootControlUiState,
   mapUsbLogControlUiState,
   type ConnectionState,
@@ -40,7 +41,8 @@ interface CarApi {
   setLights: (on: boolean) => Promise<void>;
   setMovement: (direction: MovementDirection) => Promise<void>;
   shoot: () => Promise<void>;
-  setPanAngle: (angle: number) => Promise<void>;
+  setAimAngle: (angle: number) => Promise<void>;
+  setDistanceSensorAngle: (angle: number) => Promise<void>;
   onUsbStatus: (callback: (connected: boolean) => void) => () => void;
   onWifiLogLines: (callback: (lines: string[]) => void) => () => void;
   usbLogConnect: () => Promise<void>;
@@ -111,45 +113,76 @@ let shootCooldownEnabled = true;
 // folded into the pure mapping function.
 let shootCooldownActive = false;
 
-type PanDirection = "left" | "right";
+type AimDirection = "up" | "down";
 
-// Fixed 400ms repeat cadence while a pan button is held, matching the
+// Fixed 400ms repeat cadence while an aim button is held, matching the
 // firmware's own ~300-400ms blocking interpolation time per ADR-001 — this
 // ensures only one angle command is ever in flight, preventing TCP buffer
 // backlog.
-const PAN_REPEAT_INTERVAL_MS = 400;
+const AIM_REPEAT_INTERVAL_MS = 400;
 
 // Step sizes in degrees per repeat tick, per ADR-001's Fast/Slow dropdown.
-const PAN_STEP_DEGREES: Record<"fast" | "slow", number> = {
+const AIM_STEP_DEGREES: Record<"fast" | "slow", number> = {
   fast: 10,
   slow: 5,
 };
 
-const MIN_PAN_ANGLE = 1;
-const MAX_PAN_ANGLE = 180;
+const MIN_AIM_ANGLE = 1;
+const MAX_AIM_ANGLE = 180;
 
-// App-tracked pan angle — no protocol readback exists (per ADR-001), so
+// App-tracked aim angle — no protocol readback exists (per ADR-001), so
 // this mirrors the `lightsOn` precedent: purely what the app last told the
 // servo to do. Defaults to 90, the firmware's own boot default.
-let panAngle = 90;
+let aimAngle = 90;
 
 // User-selected step size for held-button repeats, per ADR-001's
 // Fast/Slow dropdown. Fast is the default.
-let panSpeed: "fast" | "slow" = "fast";
+let aimSpeed: "fast" | "slow" = "fast";
 
-// The pan button currently held (or null when neither is held). A new
+// The aim button currently held (or null when neither is held). A new
 // pointerdown on the other button interrupts the current hold, mirroring
 // the movement D-pad's interrupt semantics.
-let panHoldDirection: PanDirection | null = null;
+let aimHoldDirection: AimDirection | null = null;
 
 // The setInterval handle driving the throttled repeat while a button is
 // held; null when nothing is held.
-let panRepeatTimer: ReturnType<typeof setInterval> | null = null;
+let aimRepeatTimer: ReturnType<typeof setInterval> | null = null;
+
+type DistanceSensorDirection = "left" | "right";
+
+// Mirrors AIM_REPEAT_INTERVAL_MS's reasoning exactly — the firmware has no
+// handler for this device code yet (see commandFrame.ts's DEVICE_DISTANCE_SENSOR
+// comment), but the same fixed-cadence contract is kept ready for when it does.
+const DISTANCE_SENSOR_REPEAT_INTERVAL_MS = 400;
+
+// Step sizes in degrees per repeat tick, mirrors AIM_STEP_DEGREES.
+const DISTANCE_SENSOR_STEP_DEGREES: Record<"fast" | "slow", number> = {
+  fast: 10,
+  slow: 5,
+};
+
+const MIN_DISTANCE_SENSOR_ANGLE = 1;
+const MAX_DISTANCE_SENSOR_ANGLE = 180;
+
+// App-tracked distance-sensor angle — no protocol readback exists, mirrors
+// aimAngle's reasoning. Defaults to 90, the assumed boot default.
+let distanceSensorAngle = 90;
+
+// User-selected step size for held-button repeats, mirrors aimSpeed.
+let distanceSensorSpeed: "fast" | "slow" = "fast";
+
+// The distance-sensor button currently held (or null when neither is held),
+// mirrors aimHoldDirection.
+let distanceSensorHoldDirection: DistanceSensorDirection | null = null;
+
+// The setInterval handle driving the throttled repeat while a button is
+// held; null when nothing is held. Mirrors aimRepeatTimer.
+let distanceSensorRepeatTimer: ReturnType<typeof setInterval> | null = null;
 
 // Each log panel's currently-displayed lines. Per spec.md, neither panel
 // auto-clears on connect/disconnect/reconnect — only an explicit Clear click
 // (or app restart) empties these — so nothing here is reset by the
-// onStatus/onUsbStatus handlers below, unlike lightsOn/panAngle. wifiLogLines
+// onStatus/onUsbStatus handlers below, unlike lightsOn/aimAngle. wifiLogLines
 // is fed live by onWifiLogLines below; usbLogLines is fed live by
 // onUsbLogLines below.
 let wifiLogLines: string[] = [];
@@ -180,7 +213,8 @@ function render(state: ConnectionState): void {
   renderLights(state);
   renderMovement(state);
   renderShoot(state);
-  renderPan(state);
+  renderAim(state);
+  renderDistanceSensor(state);
 }
 
 function renderLights(state: ConnectionState): void {
@@ -209,7 +243,7 @@ function renderMovement(state: ConnectionState): void {
 
 // USB badge is independent of ConnectionState and has no local mirrored
 // state of its own, per ADR-002 — it renders directly from whatever
-// `onUsbStatus` last pushed, unlike renderLights/renderPan/etc. which mix in
+// `onUsbStatus` last pushed, unlike renderLights/renderAim/etc. which mix in
 // app-tracked local variables. Not part of the render(state) cycle: it must
 // not be affected by, or reset alongside, Wi-Fi connect/disconnect/error
 // transitions (see implement-03 notes on why the three-reset-points
@@ -319,15 +353,26 @@ function handleLightToggleClick(): void {
   });
 }
 
-function renderPan(state: ConnectionState): void {
-  const leftButton = document.getElementById("pan-left-button") as HTMLButtonElement;
-  const rightButton = document.getElementById("pan-right-button") as HTMLButtonElement;
-  const angleText = document.getElementById("pan-angle-text") as HTMLElement;
-  const panUiState = mapPanControlUiState(state, panAngle);
+function renderAim(state: ConnectionState): void {
+  const upButton = document.getElementById("aim-up-button") as HTMLButtonElement;
+  const downButton = document.getElementById("aim-down-button") as HTMLButtonElement;
+  const angleText = document.getElementById("aim-angle-text") as HTMLElement;
+  const aimUiState = mapAimControlUiState(state, aimAngle);
 
-  leftButton.disabled = panUiState.leftDisabled;
-  rightButton.disabled = panUiState.rightDisabled;
-  angleText.textContent = `Pan: ${panAngle}°`;
+  upButton.disabled = aimUiState.upDisabled;
+  downButton.disabled = aimUiState.downDisabled;
+  angleText.textContent = `Aim: ${aimAngle}°`;
+}
+
+function renderDistanceSensor(state: ConnectionState): void {
+  const leftButton = document.getElementById("distance-sensor-left-button") as HTMLButtonElement;
+  const rightButton = document.getElementById("distance-sensor-right-button") as HTMLButtonElement;
+  const angleText = document.getElementById("distance-sensor-angle-text") as HTMLElement;
+  const distanceSensorUiState = mapDistanceSensorControlUiState(state, distanceSensorAngle);
+
+  leftButton.disabled = distanceSensorUiState.leftDisabled;
+  rightButton.disabled = distanceSensorUiState.rightDisabled;
+  angleText.textContent = `Distance Sensor: ${distanceSensorAngle}°`;
 }
 
 function handleShootClick(): void {
@@ -408,7 +453,7 @@ function clearActiveMovement(): void {
 // Placeholder pulse durations pending real hardware calibration, per
 // ADR-002 — if live testing shows these are wrong, these are the two lines
 // to tune, matching the same "unverified assumption" precedent as
-// PAN_ANGLE_DELTA below.
+// AIM_ANGLE_DELTA below.
 const ROTATE_90_MS = 400;
 const ROTATE_180_MS = 800;
 
@@ -475,24 +520,24 @@ function clearDiscreteRotateCooldown(): void {
 // unverified against the physical hardware — see the "Manual test: servo
 // direction verified" acceptance criterion. If live testing shows this is
 // backwards, this is the one line to flip.
-const PAN_ANGLE_DELTA: Record<PanDirection, 1 | -1> = {
-  left: 1,
-  right: -1,
+const AIM_ANGLE_DELTA: Record<AimDirection, 1 | -1> = {
+  up: 1,
+  down: -1,
 };
 
-// Computes one step, clamps it to [MIN_PAN_ANGLE, MAX_PAN_ANGLE], updates
+// Computes one step, clamps it to [MIN_AIM_ANGLE, MAX_AIM_ANGLE], updates
 // the app-tracked angle, sends it, and re-renders. Returns whether the
 // angle actually changed — used to stop the repeat timer once a bound is
 // reached, since further ticks in the same direction would be no-ops.
-function stepPan(direction: PanDirection): boolean {
-  const step = PAN_STEP_DEGREES[panSpeed] * PAN_ANGLE_DELTA[direction];
-  const nextAngle = Math.min(MAX_PAN_ANGLE, Math.max(MIN_PAN_ANGLE, panAngle + step));
-  const changed = nextAngle !== panAngle;
-  panAngle = nextAngle;
-  renderPan(currentState);
+function stepAim(direction: AimDirection): boolean {
+  const step = AIM_STEP_DEGREES[aimSpeed] * AIM_ANGLE_DELTA[direction];
+  const nextAngle = Math.min(MAX_AIM_ANGLE, Math.max(MIN_AIM_ANGLE, aimAngle + step));
+  const changed = nextAngle !== aimAngle;
+  aimAngle = nextAngle;
+  renderAim(currentState);
 
-  window.carAPI.setPanAngle(panAngle).catch((error: unknown) => {
-    console.error("Set pan angle failed:", error);
+  window.carAPI.setAimAngle(aimAngle).catch((error: unknown) => {
+    console.error("Set aim angle failed:", error);
   });
 
   return changed;
@@ -501,49 +546,125 @@ function stepPan(direction: PanDirection): boolean {
 // pointerdown always interrupts: a new hold overwrites the currently
 // tracked direction, mirroring the movement D-pad's interrupt semantics.
 // Fires one step immediately (real-time feedback on press), then repeats
-// at PAN_REPEAT_INTERVAL_MS while held.
-function handlePanPointerDown(direction: PanDirection): void {
-  stopActivePan();
-  panHoldDirection = direction;
+// at AIM_REPEAT_INTERVAL_MS while held.
+function handleAimPointerDown(direction: AimDirection): void {
+  stopActiveAim();
+  aimHoldDirection = direction;
 
-  const changed = stepPan(direction);
+  const changed = stepAim(direction);
   if (!changed) {
     // Already at the bound — nothing further to repeat.
-    panHoldDirection = null;
+    aimHoldDirection = null;
     return;
   }
 
-  panRepeatTimer = setInterval(() => {
-    const stillChanging = stepPan(direction);
+  aimRepeatTimer = setInterval(() => {
+    const stillChanging = stepAim(direction);
     if (!stillChanging) {
-      stopActivePan();
+      stopActiveAim();
     }
-  }, PAN_REPEAT_INTERVAL_MS);
+  }, AIM_REPEAT_INTERVAL_MS);
 }
 
 // pointerup/pointerleave/pointercancel all funnel through here. Only the
-// event whose direction matches the currently-held panHoldDirection stops
+// event whose direction matches the currently-held aimHoldDirection stops
 // the repeat timer — a release from a since-superseded button is a no-op,
 // matching the movement D-pad's release-matching semantics.
-function handlePanRelease(direction: PanDirection): void {
-  if (panHoldDirection !== direction) {
+function handleAimRelease(direction: AimDirection): void {
+  if (aimHoldDirection !== direction) {
     return;
   }
-  stopActivePan();
+  stopActiveAim();
 }
 
 // Clears the repeat timer and the held-direction tracking. Used by
 // pointerup/release, window-blur, and once a bound is reached mid-repeat.
-function stopActivePan(): void {
-  if (panRepeatTimer !== null) {
-    clearInterval(panRepeatTimer);
-    panRepeatTimer = null;
+function stopActiveAim(): void {
+  if (aimRepeatTimer !== null) {
+    clearInterval(aimRepeatTimer);
+    aimRepeatTimer = null;
   }
-  panHoldDirection = null;
+  aimHoldDirection = null;
 }
 
-function handlePanSpeedChange(event: Event): void {
-  panSpeed = (event.target as HTMLSelectElement).value as "fast" | "slow";
+function handleAimSpeedChange(event: Event): void {
+  aimSpeed = (event.target as HTMLSelectElement).value as "fast" | "slow";
+}
+
+// Direction sign is a starting assumption, explicitly unverified against the
+// physical hardware — mirrors AIM_ANGLE_DELTA's same caveat (see this plan's
+// CONTEXT.md "unverified direction-sign placeholder" decision). If live
+// testing shows this is backwards, this is the one line to flip.
+const DISTANCE_SENSOR_ANGLE_DELTA: Record<DistanceSensorDirection, 1 | -1> = {
+  left: -1,
+  right: 1,
+};
+
+// Computes one step, clamps it to [MIN_DISTANCE_SENSOR_ANGLE,
+// MAX_DISTANCE_SENSOR_ANGLE], updates the app-tracked angle, sends it, and
+// re-renders. Returns whether the angle actually changed — used to stop the
+// repeat timer once a bound is reached. Mirrors stepAim().
+function stepDistanceSensor(direction: DistanceSensorDirection): boolean {
+  const step = DISTANCE_SENSOR_STEP_DEGREES[distanceSensorSpeed] * DISTANCE_SENSOR_ANGLE_DELTA[direction];
+  const nextAngle = Math.min(
+    MAX_DISTANCE_SENSOR_ANGLE,
+    Math.max(MIN_DISTANCE_SENSOR_ANGLE, distanceSensorAngle + step),
+  );
+  const changed = nextAngle !== distanceSensorAngle;
+  distanceSensorAngle = nextAngle;
+  renderDistanceSensor(currentState);
+
+  window.carAPI.setDistanceSensorAngle(distanceSensorAngle).catch((error: unknown) => {
+    console.error("Set distance sensor angle failed:", error);
+  });
+
+  return changed;
+}
+
+// pointerdown always interrupts: a new hold overwrites the currently tracked
+// direction, mirroring handleAimPointerDown(). Fires one step immediately,
+// then repeats at DISTANCE_SENSOR_REPEAT_INTERVAL_MS while held.
+function handleDistanceSensorPointerDown(direction: DistanceSensorDirection): void {
+  stopActiveDistanceSensor();
+  distanceSensorHoldDirection = direction;
+
+  const changed = stepDistanceSensor(direction);
+  if (!changed) {
+    // Already at the bound — nothing further to repeat.
+    distanceSensorHoldDirection = null;
+    return;
+  }
+
+  distanceSensorRepeatTimer = setInterval(() => {
+    const stillChanging = stepDistanceSensor(direction);
+    if (!stillChanging) {
+      stopActiveDistanceSensor();
+    }
+  }, DISTANCE_SENSOR_REPEAT_INTERVAL_MS);
+}
+
+// pointerup/pointerleave/pointercancel all funnel through here. Only the
+// event whose direction matches the currently-held distanceSensorHoldDirection
+// stops the repeat timer, mirroring handleAimRelease().
+function handleDistanceSensorRelease(direction: DistanceSensorDirection): void {
+  if (distanceSensorHoldDirection !== direction) {
+    return;
+  }
+  stopActiveDistanceSensor();
+}
+
+// Clears the repeat timer and the held-direction tracking. Mirrors
+// stopActiveAim().
+function stopActiveDistanceSensor(): void {
+  if (distanceSensorRepeatTimer !== null) {
+    clearInterval(distanceSensorRepeatTimer);
+    distanceSensorRepeatTimer = null;
+  }
+  distanceSensorHoldDirection = null;
+}
+
+function handleDistanceSensorSpeedChange(event: Event): void {
+  distanceSensorSpeed = (event.target as HTMLSelectElement).value as "fast" | "slow";
 }
 
 render(currentState);
@@ -571,20 +692,39 @@ for (const [direction, id] of Object.entries(MOVEMENT_BUTTON_IDS) as Array<
   button.addEventListener("pointercancel", () => handleMovementRelease(direction));
 }
 
-const PAN_BUTTON_IDS: Record<PanDirection, string> = {
-  left: "pan-left-button",
-  right: "pan-right-button",
+const AIM_BUTTON_IDS: Record<AimDirection, string> = {
+  up: "aim-up-button",
+  down: "aim-down-button",
 };
 
-for (const [direction, id] of Object.entries(PAN_BUTTON_IDS) as Array<[PanDirection, string]>) {
+for (const [direction, id] of Object.entries(AIM_BUTTON_IDS) as Array<[AimDirection, string]>) {
   const button = document.getElementById(id)!;
-  button.addEventListener("pointerdown", () => handlePanPointerDown(direction));
-  button.addEventListener("pointerup", () => handlePanRelease(direction));
-  button.addEventListener("pointerleave", () => handlePanRelease(direction));
-  button.addEventListener("pointercancel", () => handlePanRelease(direction));
+  button.addEventListener("pointerdown", () => handleAimPointerDown(direction));
+  button.addEventListener("pointerup", () => handleAimRelease(direction));
+  button.addEventListener("pointerleave", () => handleAimRelease(direction));
+  button.addEventListener("pointercancel", () => handleAimRelease(direction));
 }
 
-document.getElementById("pan-speed-select")!.addEventListener("change", handlePanSpeedChange);
+document.getElementById("aim-speed-select")!.addEventListener("change", handleAimSpeedChange);
+
+const DISTANCE_SENSOR_BUTTON_IDS: Record<DistanceSensorDirection, string> = {
+  left: "distance-sensor-left-button",
+  right: "distance-sensor-right-button",
+};
+
+for (const [direction, id] of Object.entries(DISTANCE_SENSOR_BUTTON_IDS) as Array<
+  [DistanceSensorDirection, string]
+>) {
+  const button = document.getElementById(id)!;
+  button.addEventListener("pointerdown", () => handleDistanceSensorPointerDown(direction));
+  button.addEventListener("pointerup", () => handleDistanceSensorRelease(direction));
+  button.addEventListener("pointerleave", () => handleDistanceSensorRelease(direction));
+  button.addEventListener("pointercancel", () => handleDistanceSensorRelease(direction));
+}
+
+document
+  .getElementById("distance-sensor-speed-select")!
+  .addEventListener("change", handleDistanceSensorSpeedChange);
 
 for (const { id, direction, angleDegrees } of DISCRETE_ROTATE_BUTTONS) {
   document
@@ -594,7 +734,8 @@ for (const { id, direction, angleDegrees } of DISCRETE_ROTATE_BUTTONS) {
 
 window.addEventListener("blur", () => {
   stopActiveMovement();
-  stopActivePan();
+  stopActiveAim();
+  stopActiveDistanceSensor();
   stopActiveDiscreteRotate();
 });
 
@@ -610,7 +751,10 @@ window.carAPI.onStatus((state) => {
     // decision: no protocol readback exists for the servo angle either, so
     // the app must not carry over a stale angle assumption across a fresh
     // connect/reconnect, disconnect, or error.
-    panAngle = 90;
+    aimAngle = 90;
+    // Same reasoning again for the distance-sensor angle — no protocol
+    // readback exists for it either.
+    distanceSensorAngle = 90;
   }
 
   // Movement commands only work over an active tcp100 session — if the
@@ -620,11 +764,13 @@ window.carAPI.onStatus((state) => {
   // sent: the socket is already gone or about to be, per ADR-001.
   if (state.status !== "connected" || state.protocol !== "tcp100") {
     clearActiveMovement();
-    // Same reasoning as movement above: pan commands only work over an
-    // active tcp100 session, so a held pan button's repeat timer must stop
-    // rather than keep firing calls that CarConnection.setPanAngle() would
+    // Same reasoning as movement above: aim commands only work over an
+    // active tcp100 session, so a held aim button's repeat timer must stop
+    // rather than keep firing calls that CarConnection.setAimAngle() would
     // just reject.
-    stopActivePan();
+    stopActiveAim();
+    // Same reasoning again for the distance-sensor control's repeat timer.
+    stopActiveDistanceSensor();
     // Same reasoning again: a mid-pulse disconnect must not leave the
     // movement/rotate button set stuck disabled, nor let a stale setTimeout
     // fire a doomed Stop call later once the session is already gone.

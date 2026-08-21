@@ -13,6 +13,7 @@ import {
 import {
   buildCommandFrame,
   CMD_RUN,
+  DEVICE_DISTANCE_SENSOR,
   DEVICE_LED,
   DEVICE_MOTOR,
   DEVICE_SERVO,
@@ -247,7 +248,7 @@ export class CarConnection extends EventEmitter {
   }
 
   /**
-   * Convenience wrapper over `sendCommandFrame()` for the QD005 pan servo
+   * Convenience wrapper over `sendCommandFrame()` for the QD005 aim servo
    * (see ADR-001 at
    * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
    * `angle` is sent as-is as the absolute-angle value byte — range
@@ -257,9 +258,28 @@ export class CarConnection extends EventEmitter {
    * gating/rejection contract as `setLedState()`/`setMovement()`/`shoot()`,
    * inherited from `sendCommandFrame()` rather than duplicated here.
    */
-  async setPanAngle(angle: number): Promise<void> {
+  async setAimAngle(angle: number): Promise<void> {
     await this.sendCommandFrame(
       buildCommandFrame({ action: CMD_RUN, device: DEVICE_SERVO, value: angle }),
+    );
+  }
+
+  /**
+   * Convenience wrapper over `sendCommandFrame()` for the distance sensor's
+   * pan servo (see
+   * .gh-workflows/plans/20260820_115614-distance-servo-pan-control/). Mirrors
+   * `setAimAngle()` exactly — `angle` is sent as-is as the absolute-angle
+   * value byte, range validation (1-180) happens at the IPC trust boundary
+   * (`carIpcHandlers.ts`), and this shares `setLedState()`/`setMovement()`/
+   * `shoot()`/`setAimAngle()`'s gating/rejection contract, inherited from
+   * `sendCommandFrame()` rather than duplicated here. Unlike `setAimAngle()`,
+   * `DEVICE_DISTANCE_SENSOR` has no firmware handler yet (see
+   * commandFrame.ts) — the frame still gets written to the socket, it's just
+   * silently ignored by the car until separate future work adds one.
+   */
+  async setDistanceSensorAngle(angle: number): Promise<void> {
+    await this.sendCommandFrame(
+      buildCommandFrame({ action: CMD_RUN, device: DEVICE_DISTANCE_SENSOR, value: angle }),
     );
   }
 

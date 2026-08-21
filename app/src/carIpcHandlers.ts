@@ -13,7 +13,8 @@ export interface CarConnectionLike {
   setLedState(on: boolean): Promise<void>;
   setMovement(direction: MovementDirection): Promise<void>;
   shoot(): Promise<void>;
-  setPanAngle(angle: number): Promise<void>;
+  setAimAngle(angle: number): Promise<void>;
+  setDistanceSensorAngle(angle: number): Promise<void>;
   getState(): ConnectionState;
   on(event: "state-change", listener: (state: ConnectionState) => void): unknown;
   on(event: "log-lines", listener: (lines: string[]) => void): unknown;
@@ -27,15 +28,24 @@ export interface CarIpcHandlers {
   handleSetLights: (on: boolean) => Promise<void>;
   handleSetMovement: (direction: MovementDirection) => Promise<void>;
   handleShoot: () => Promise<void>;
-  handleSetPanAngle: (angle: number) => Promise<void>;
+  handleSetAimAngle: (angle: number) => Promise<void>;
+  handleSetDistanceSensorAngle: (angle: number) => Promise<void>;
 }
 
 // Firmware-supported servo range, per ADR-001 at
 // .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md —
 // angles outside this range risk servo over-drive via the firmware's
 // map(angle, 1, 180, 130, 70) extrapolation.
-const MIN_PAN_ANGLE = 1;
-const MAX_PAN_ANGLE = 180;
+const MIN_AIM_ANGLE = 1;
+const MAX_AIM_ANGLE = 180;
+
+// Bounds for the distance-sensor servo, per
+// .gh-workflows/plans/20260820_115614-distance-servo-pan-control/ —
+// deliberately mirrors MIN_AIM_ANGLE/MAX_AIM_ANGLE's full 1-180 range for
+// consistency, even though the firmware (once it gains a handler for this
+// device code) is expected to only use a narrower internal sub-range.
+const MIN_DISTANCE_SENSOR_ANGLE = 1;
+const MAX_DISTANCE_SENSOR_ANGLE = 180;
 
 /**
  * Plain, Electron-free handler functions for the `connect`/`disconnect`
@@ -78,8 +88,8 @@ const MAX_PAN_ANGLE = 180;
  * .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
  * It takes no arguments, so there is no allowlist check to perform here.
  *
- * `handleSetPanAngle` follows the same resolve-once-initiated contract via
- * `CarConnection.setPanAngle()`, which shares `setLedState()`'s
+ * `handleSetAimAngle` follows the same resolve-once-initiated contract via
+ * `CarConnection.setAimAngle()`, which shares `setLedState()`'s
  * `sendCommandFrame()` gating/rejection shape exactly (see the same
  * ADR-001). It additionally validates `angle` is an integer in [1, 180]
  * before calling through: `angle: number` is only a compile-time
@@ -87,6 +97,13 @@ const MAX_PAN_ANGLE = 180;
  * compromised or buggy renderer can send any value over `ipcMain.handle`,
  * so the check has to happen at runtime here rather than being assumed
  * from the type, matching `handleSetMovement`'s direction-allowlist check.
+ *
+ * `handleSetDistanceSensorAngle` follows the identical contract via
+ * `CarConnection.setDistanceSensorAngle()`, mirroring
+ * `handleSetAimAngle`/`isValidAimAngle` exactly (see
+ * .gh-workflows/plans/20260820_115614-distance-servo-pan-control/) — same
+ * [1, 180] runtime bounds check at the IPC trust boundary, same rejection
+ * shape.
  */
 export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandlers {
   return {
@@ -100,11 +117,17 @@ export function createCarIpcHandlers(connection: CarConnectionLike): CarIpcHandl
       return connection.setMovement(direction);
     },
     handleShoot: () => connection.shoot(),
-    handleSetPanAngle: (angle: number) => {
-      if (!isValidPanAngle(angle)) {
-        return Promise.reject(new Error(`Invalid pan angle: ${String(angle)}`));
+    handleSetAimAngle: (angle: number) => {
+      if (!isValidAimAngle(angle)) {
+        return Promise.reject(new Error(`Invalid aim angle: ${String(angle)}`));
       }
-      return connection.setPanAngle(angle);
+      return connection.setAimAngle(angle);
+    },
+    handleSetDistanceSensorAngle: (angle: number) => {
+      if (!isValidDistanceSensorAngle(angle)) {
+        return Promise.reject(new Error(`Invalid distance sensor angle: ${String(angle)}`));
+      }
+      return connection.setDistanceSensorAngle(angle);
     },
   };
 }
@@ -121,12 +144,26 @@ function isMovementDirection(value: unknown): value is MovementDirection {
 
 /**
  * Runtime bounds check for the `angle` value received over the
- * `car:set-pan-angle` IPC channel, per ADR-001's [1, 180] firmware-safe
+ * `car:set-aim-angle` IPC channel, per ADR-001's [1, 180] firmware-safe
  * range. `Number.isInteger` also rejects `NaN`/`Infinity` and non-numbers,
  * so no separate `typeof` check is needed.
  */
-function isValidPanAngle(value: unknown): value is number {
-  return Number.isInteger(value) && (value as number) >= MIN_PAN_ANGLE && (value as number) <= MAX_PAN_ANGLE;
+function isValidAimAngle(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= MIN_AIM_ANGLE && (value as number) <= MAX_AIM_ANGLE;
+}
+
+/**
+ * Runtime bounds check for the `angle` value received over the
+ * `car:set-distance-sensor-angle` IPC channel, mirroring `isValidAimAngle`
+ * exactly against the [1, 180] range in
+ * .gh-workflows/plans/20260820_115614-distance-servo-pan-control/.
+ */
+function isValidDistanceSensorAngle(value: unknown): value is number {
+  return (
+    Number.isInteger(value) &&
+    (value as number) >= MIN_DISTANCE_SENSOR_ANGLE &&
+    (value as number) <= MAX_DISTANCE_SENSOR_ANGLE
+  );
 }
 
 /**
