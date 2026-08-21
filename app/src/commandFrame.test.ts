@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildCommandFrame,
   CMD_RUN,
+  DEVICE_DISTANCE_SENSOR,
   DEVICE_LED,
   DEVICE_MOTOR,
   DEVICE_SERVO,
@@ -98,6 +99,25 @@ for (const angle of SERVO_FRAME_CASES) {
     assert.deepEqual(
       [...frame],
       [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x00, angle],
+    );
+  });
+}
+
+// Per distance-servo-pan-control plan
+// (.gh-workflows/plans/20260820_115614-distance-servo-pan-control/), the
+// distance-sensor servo command's exact wire value for representative
+// angles across the full 1-180 range, including both bounds. Device code
+// 0x04 is a placeholder — the firmware has no handler for it yet — but the
+// frame-building shape is identical to DEVICE_SERVO's.
+const DISTANCE_SENSOR_FRAME_CASES: number[] = [1, 5, 45, 90, 135, 179, 180];
+
+for (const angle of DISTANCE_SENSOR_FRAME_CASES) {
+  test(`buildCommandFrame produces the exact distance-sensor servo frame for angle ${angle}`, () => {
+    const frame = buildCommandFrame({ action: CMD_RUN, device: DEVICE_DISTANCE_SENSOR, value: angle });
+
+    assert.deepEqual(
+      [...frame],
+      [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00, angle],
     );
   });
 }

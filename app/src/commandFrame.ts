@@ -39,12 +39,23 @@ export const DEVICE_MOTOR = 0x0c;
 // this device code fires a fixed 200ms pulse regardless of value.
 export const DEVICE_SHOOT = 0x08;
 
-// Device code for the QD005 water gun's pan servo, reverse-engineered from
+// Device code for the QD005 water gun's aim servo, reverse-engineered from
 // the firmware's runModule() (see ADR-001 at
 // .gh-workflows/plans/20260815_083408-water-gun-control/grill/ADR-001.md).
 // The value byte is an absolute angle in degrees, 1-180 inclusive — the
 // firmware maps it to a PWM value via map(angle, 1, 180, 130, 70).
 export const DEVICE_SERVO = 0x02;
+
+// Device code for the distance sensor's pan servo (the ultrasonic sensor
+// bracket mounted on GPIO 25), placeholder pending firmware support — see
+// .gh-workflows/plans/20260820_115614-distance-servo-pan-control/. Unlike
+// DEVICE_SERVO/DEVICE_SHOOT/etc. above, this is NOT reverse-engineered from
+// an existing runModule() handler: the firmware has no case for this device
+// code yet, so any frame sent with it is silently ignored by the car until
+// separate future work adds the handler and reflashes the firmware. The
+// value byte is intended to be an absolute angle in degrees, 1-180
+// inclusive, matching DEVICE_SERVO's convention once firmware support lands.
+export const DEVICE_DISTANCE_SENSOR = 0x04;
 
 // Convention-only placeholder value for shoot commands, per ADR-001: since
 // the firmware ignores payload[9] entirely for device 0x08, this exists

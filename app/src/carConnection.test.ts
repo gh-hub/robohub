@@ -565,7 +565,7 @@ test("shoot() rejects without writing to the socket on an http80 session", async
 const SERVO_FRAME_CASES: number[] = [1, 5, 45, 90, 135, 179, 180];
 
 for (const angle of SERVO_FRAME_CASES) {
-  test(`setPanAngle(${angle}) writes the exact ADR-001 servo frame to the TCP socket`, async () => {
+  test(`setAimAngle(${angle}) writes the exact ADR-001 servo frame to the TCP socket`, async () => {
     const { ready, onConnection } = captureServerSocket();
     const tcpPort = await startMockTcpServer(onConnection);
     const connection = new CarConnection({
@@ -577,7 +577,7 @@ for (const angle of SERVO_FRAME_CASES) {
 
     const [serverSocket] = await Promise.all([ready, connection.connect()]);
     const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
-    await connection.setPanAngle(angle);
+    await connection.setAimAngle(angle);
 
     assert.deepEqual(
       [...(await receivedData)],
@@ -586,13 +586,13 @@ for (const angle of SERVO_FRAME_CASES) {
   });
 }
 
-test("setPanAngle() rejects without writing to the socket when disconnected", async () => {
+test("setAimAngle() rejects without writing to the socket when disconnected", async () => {
   const connection = new CarConnection({ timeoutMs: TEST_TIMEOUT_MS });
 
-  await assert.rejects(() => connection.setPanAngle(90), /status is "disconnected"/);
+  await assert.rejects(() => connection.setAimAngle(90), /status is "disconnected"/);
 });
 
-test("setPanAngle() rejects without writing to the socket on an http80 session", async () => {
+test("setAimAngle() rejects without writing to the socket on an http80 session", async () => {
   let requestCount = 0;
   const httpPort = await startMockHttpServer(() => {
     requestCount += 1;
@@ -606,10 +606,70 @@ test("setPanAngle() rejects without writing to the socket on an http80 session",
   await connection.connect();
   assert.equal(connection.getState().protocol, "http80");
 
-  await assert.rejects(() => connection.setPanAngle(90), /protocol is "http80"/);
+  await assert.rejects(() => connection.setAimAngle(90), /protocol is "http80"/);
 
   // Only the initial probe GET should have hit the mock server — no
-  // additional request/write was attempted by the rejected setPanAngle() call.
+  // additional request/write was attempted by the rejected setAimAngle() call.
+  assert.equal(requestCount, 1);
+
+  await connection.disconnect();
+});
+
+// Per distance-servo-pan-control plan
+// (.gh-workflows/plans/20260820_115614-distance-servo-pan-control/), the
+// distance-sensor servo command's exact wire bytes and gating contract,
+// mirroring setAimAngle()'s coverage exactly — device code 0x04 instead of
+// 0x02, no firmware handler yet (see commandFrame.ts's DEVICE_DISTANCE_SENSOR
+// comment), but the frame-building and gating are identical.
+const DISTANCE_SENSOR_FRAME_CASES: number[] = [1, 5, 45, 90, 135, 179, 180];
+
+for (const angle of DISTANCE_SENSOR_FRAME_CASES) {
+  test(`setDistanceSensorAngle(${angle}) writes the exact distance-sensor servo frame to the TCP socket`, async () => {
+    const { ready, onConnection } = captureServerSocket();
+    const tcpPort = await startMockTcpServer(onConnection);
+    const connection = new CarConnection({
+      host: "127.0.0.1",
+      tcpPort,
+      httpPort: CLOSED_HTTP_PORT,
+      timeoutMs: TEST_TIMEOUT_MS,
+    });
+
+    const [serverSocket] = await Promise.all([ready, connection.connect()]);
+    const receivedData = new Promise<Buffer>((resolve) => serverSocket.once("data", resolve));
+    await connection.setDistanceSensorAngle(angle);
+
+    assert.deepEqual(
+      [...(await receivedData)],
+      [0xff, 0x55, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00, angle],
+    );
+  });
+}
+
+test("setDistanceSensorAngle() rejects without writing to the socket when disconnected", async () => {
+  const connection = new CarConnection({ timeoutMs: TEST_TIMEOUT_MS });
+
+  await assert.rejects(() => connection.setDistanceSensorAngle(90), /status is "disconnected"/);
+});
+
+test("setDistanceSensorAngle() rejects without writing to the socket on an http80 session", async () => {
+  let requestCount = 0;
+  const httpPort = await startMockHttpServer(() => {
+    requestCount += 1;
+  });
+  const connection = new CarConnection({
+    host: "127.0.0.1",
+    tcpPort: CLOSED_TCP_PORT,
+    httpPort,
+    timeoutMs: TEST_TIMEOUT_MS,
+  });
+  await connection.connect();
+  assert.equal(connection.getState().protocol, "http80");
+
+  await assert.rejects(() => connection.setDistanceSensorAngle(90), /protocol is "http80"/);
+
+  // Only the initial probe GET should have hit the mock server — no
+  // additional request/write was attempted by the rejected
+  // setDistanceSensorAngle() call.
   assert.equal(requestCount, 1);
 
   await connection.disconnect();

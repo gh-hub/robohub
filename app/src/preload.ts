@@ -27,7 +27,8 @@ const CAR_STATUS_CHANNEL = "car:status";
 const CAR_SET_LIGHTS_CHANNEL = "car:set-lights";
 const CAR_SET_MOVEMENT_CHANNEL = "car:set-movement";
 const CAR_SHOOT_CHANNEL = "car:shoot";
-const CAR_SET_PAN_ANGLE_CHANNEL = "car:set-pan-angle";
+const CAR_SET_AIM_ANGLE_CHANNEL = "car:set-aim-angle";
+const CAR_SET_DISTANCE_SENSOR_ANGLE_CHANNEL = "car:set-distance-sensor-angle";
 const CAR_USB_STATUS_CHANNEL = "car:usb-status";
 const CAR_WIFI_LOG_LINE_CHANNEL = "car:wifi-log-line";
 const CAR_USB_LOG_CONNECT_CHANNEL = "car:usb-log-connect";
@@ -69,13 +70,22 @@ export interface CarApi {
    * exact rejection contract. Takes no arguments: the firmware ignores the
    * value byte for this device (see ADR-001). */
   shoot: () => Promise<void>;
-  /** Sends an absolute pan-servo angle command frame. Resolves once the
+  /** Sends an absolute aim-servo angle command frame. Resolves once the
    * frame has been written to the socket; rejects (without writing) if
-   * there's no active tcp100 session — see `CarConnection.setPanAngle()`/
+   * there's no active tcp100 session — see `CarConnection.setAimAngle()`/
    * `sendCommandFrame()` for the exact rejection contract. `angle` must be
    * an integer in [1, 180]; the main-process handler validates this at the
    * IPC trust boundary and rejects otherwise (see ADR-001). */
-  setPanAngle: (angle: number) => Promise<void>;
+  setAimAngle: (angle: number) => Promise<void>;
+  /** Sends an absolute distance-sensor-servo angle command frame. Resolves
+   * once the frame has been written to the socket; rejects (without
+   * writing) if there's no active tcp100 session — see
+   * `CarConnection.setDistanceSensorAngle()`/`sendCommandFrame()` for the
+   * exact rejection contract. `angle` must be an integer in [1, 180]; the
+   * main-process handler validates this at the IPC trust boundary and
+   * rejects otherwise (see
+   * .gh-workflows/plans/20260820_115614-distance-servo-pan-control/). */
+  setDistanceSensorAngle: (angle: number) => Promise<void>;
   /** Subscribes to every USB-serial status push. Returns an unsubscribe
    * function. Per ADR-002, this is informational-only — there is no
    * initial-state query, so callers should assume "not connected" until
@@ -129,7 +139,8 @@ const carAPI: CarApi = {
   setLights: (on) => ipcRenderer.invoke(CAR_SET_LIGHTS_CHANNEL, on),
   setMovement: (direction) => ipcRenderer.invoke(CAR_SET_MOVEMENT_CHANNEL, direction),
   shoot: () => ipcRenderer.invoke(CAR_SHOOT_CHANNEL),
-  setPanAngle: (angle) => ipcRenderer.invoke(CAR_SET_PAN_ANGLE_CHANNEL, angle),
+  setAimAngle: (angle) => ipcRenderer.invoke(CAR_SET_AIM_ANGLE_CHANNEL, angle),
+  setDistanceSensorAngle: (angle) => ipcRenderer.invoke(CAR_SET_DISTANCE_SENSOR_ANGLE_CHANNEL, angle),
   onStatus: (callback) => {
     const listener = (_event: IpcRendererEvent, state: ConnectionState): void => callback(state);
     ipcRenderer.on(CAR_STATUS_CHANNEL, listener);
